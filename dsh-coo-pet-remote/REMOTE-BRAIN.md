@@ -1,9 +1,9 @@
 # `brain: remote` —— Coo 桌宠的「服务器大脑」fork 说明
 
 > **上游**：[dsh-coo-pet](https://github.com/vortioxetine213/dsh-coo-pet) v0.2.1（MIT）
-> **本 fork**：`dsh-coo-pet-remote` **0.4.1-remote.1（v1.2：多形象包 + 桌宠 DIY；通用可分发版）**
+> **本 fork**：`dsh-coo-pet-remote` **0.4.2-remote.1（v1.2：多形象包 + 桌宠 DIY；通用可分发版）**
 > **协议**：bridge v1（WS `/chat?token=...`）+ bridge v1.1 的 `GET /mood`（具体说明见 bridge 项目）
-> **状态**：单元/集成/分发自查 47/47 通过；**未安装、未重启、未启动 Coopanion、未碰 Coopanion 目录/服务器**
+> **状态**：单元/集成/分发自查 48/48 通过；**未安装、未重启、未启动 Coopanion、未碰 Coopanion 目录/服务器**
 > 写给：接手安装/维护的人。装法/热重载看 [INSTALL.md](INSTALL.md)，分发/打包看 [DISTRIBUTION.md](DISTRIBUTION.md)。
 
 ---
@@ -40,7 +40,7 @@ v1.2 起把「外观」彻底打开：支持 **多形象包**（内置 `coo` / `
    └─ pet-settings.mjs   ← (v1.2) pet-settings.json → 设置/页面 skin 的纯函数
         │ ws://127.0.0.1:47891/chat?token=...   +   GET http://127.0.0.1:47891/mood
         ▼
- 本机 bridge(bridge/server.mjs, 由 link-bridge 实现)
+ 本机 bridge(bridge/server.mjs, 由独立的 bridge 项目实现)
    ├─ 离线铸 DSH cookie + SSH 隧道 → 服务器 127.0.0.1:3080
    ├─ session/create / session/prompt / session/follow → 桌宠会话
    ├─ 角色卡 once 注入(只读)
@@ -86,7 +86,7 @@ v1.2 起把「外观」彻底打开：支持 **多形象包**（内置 `coo` / `
 | `test/brain-remote.test.mjs` | 392 | 远程大脑单元测试（15 条：聊天 9 + 连接/工具 1 + 心情 5） |
 | `test/mood.test.mjs` | 127 | **v1.1 新增**：心情文案/动作映射纯函数测试（9 条） |
 | `test/pet-diy.test.mjs` | 379 | **v1.2 新增**：形象包扫描/导入、设置校验/降级、preset/多轴/coo 槽位/自定义轴解析、旧 skin.json 迁移（14 条） |
-| `test/impl-remote.test.mjs` | 424 | `impl.js` 端到端集成测试（假 Cordis ctx + 假 Coopanion 目录 + 假桌宠页面 + mock bridge；含心情/气泡动作/v1.2 多 pack 与 pet-settings 热应用+广播/v0.4.1 token 路径与缺配置提示） |
+| `test/impl-remote.test.mjs` | 481 | `impl.js` 端到端集成测试（假 Cordis ctx + 假 Coopanion 目录 + 假桌宠页面 + mock bridge；含心情/气泡动作/v1.2 多 pack 与 pet-settings 热应用+广播/v0.4.1 token 路径与缺配置提示） |
 | `test/distribution.test.mjs` | 164 | **v0.4.1 新增**：分发自查（发布白名单/源码/patch/config-bundle 无私有值；默认配置未写死部署字段；打包白名单合理） |
 | `test/stubs/dsh-tools.mjs`、`test/stubs/loader.mjs` | 30 | 只在测试里把 `@deepseek-ai/dsh-tools` 换成替身（DSH 宿主之外解析不到这个包） |
 | `dev/remote-probe.mjs` | 102 | 独立探针：不起 DSH/Coopanion，直接验 `RemoteBrain ↔ bridge`（支持 `--self-test` 用内置 mock） |
@@ -95,7 +95,7 @@ v1.2 起把「外观」彻底打开：支持 **多形象包**（内置 `coo` / `
 
 ### 2.2 修改文件
 
-**`lib/impl.js`（+520/−117，1328 行）** —— 选大脑/心情/DIY 设置/分发通用化这几圈改动，窗口/换装/互聊/工具逻辑其余原样：
+**`lib/impl.js`（+550/−117，1358 行）** —— 选大脑/心情/DIY 设置/分发通用化这几圈改动，窗口/换装/互聊/工具逻辑其余原样：
 
 | 位置（行号） | 改动 |
 | --- | --- |
@@ -168,7 +168,7 @@ v1.2 起把「外观」彻底打开：支持 **多形象包**（内置 `coo` / `
 **`package.json`**：
 - 包名 `dsh-coo-pet` → **`dsh-coo-pet-remote`**，版本 `0.2.1` → `0.3.0-remote.1`（v1 远程大脑）→
   `0.3.1-remote.1`（v1.1 心情）→ `0.4.0-remote.1`（v1.2 多形象包 + 桌宠 DIY）→
-  **`0.4.1-remote.1`（通用/可分发版：默认无本机路径、配置自动探测、token 缺失有提示）**
+  **`0.4.2-remote.1`（通用/可分发版：默认无本机路径、配置自动探测、token 缺失有提示）**
   （理由：bundle entry id 必须与包名一致且全局唯一；也避免以后官方包装进来时两份同名冲突）；
 - `scripts.test` / `test:remote` 指向五个测试文件（brain-remote / mood / pet-diy / distribution / impl-remote）；
   `files` 加 `REMOTE-BRAIN.md`、`INSTALL.md`、`DISTRIBUTION.md`、`LICENSE`；
@@ -213,6 +213,24 @@ v1.2 起把「外观」彻底打开：支持 **多形象包**（内置 `coo` / `
   （本机盘符、用户名、服务器 IP、SSH 私钥名、角色卡名、QQ 号/会话 id、部署用户名/目录），
   并校验默认 patch 不写死部署字段、打包白名单不含 test/dev/config-bundle。
 - 打包方式与注意见 [DISTRIBUTION.md](DISTRIBUTION.md)。
+
+### 2.5 v0.4.2 修复：导入新形象包后不重扫（真机 bug）
+
+**现象**：面板通过 ZIP 导入新 pack（落盘到 `web/<id>/`、面板也能列出）→ 保存 `pet-settings.json` 选它 →
+插件仍显示旧 pack、`pet_status` 的「形象包」列表不变。
+
+**根因**：`reloadPacks()`（重新扫 `web/*/figure.json` 的入口）只在
+`normalization.warnings` 包含**字面量**「未知形象包」时触发；T22 之后 warning 文案改成了
+「不是已安装的形象包…」，条件永远不成立 —— 文案成了逻辑开关。
+
+**修复**：
+- 新增 `ensurePackKnown(figure)`：语义判断 —— `figure` 不在当前 `PACKS` 就先 `reloadPacks()`，再判一次；
+- 用在所有入口：启动 normalize 前（settings / 旧 skin.json / Config 的 figure）、settings 轮询、
+  `applySettings()`（此时丢弃按旧 PACKS 传进来的 resolved 结果，重算）、换装页 `/api/skin` 保存；
+- 保险层：重扫后仍找不到 → **保留当前 figure + warn**（不悄悄回退 whale），不影响已加载的包；
+- 删掉所有「按 warning 文案触发重扫」的代码；单测覆盖「zip 落盘 → 保存 figure → 1s 内自动重扫采用」
+  与「重扫后仍未知 → 保留当前」。
+
 
 > `lib/index.js` 的薄壳 + 动态 import 设计正好帮了大忙：`impl.js` 和 `brain-remote.mjs` 都是
 > `?v=<时间戳>` 动态加载的，改完文件重载插件就生效，**不用重启 DSH**。
@@ -481,7 +499,7 @@ node --test test/brain-remote.test.mjs test/mood.test.mjs test/pet-diy.test.mjs 
 ### 4.2 结果（2026-10-28/29 实测，v1.2 + 分发自查）
 
 ```text
-# brain-remote(15) + mood(9) + pet-diy(14) + distribution(5) + impl 端到端/token(4) = 47
+# brain-remote(15) + mood(9) + pet-diy(14) + distribution(5) + impl(5) = 48
 ✔ chatUrlOf / 流式 delta→final / busy / 超时(迟到 final 不串句) / 断线重连 / 并发 busy
 ✔ bridge error 帧 / 连不上 bridge(token 提示) / forget 只清本地
 ✔ httpBaseOf / mood 刷新成功 / 自动轮询+stop 清定时器 / HTTP500 保留旧值 / mood:null 404 / /mood 超时
@@ -499,8 +517,10 @@ node --test test/brain-remote.test.mjs test/mood.test.mjs test/pet-diy.test.mjs 
 ✔ v0.4.1:resolveBridgeTokenFile 绝对/相对 dataDir/~ / 空;相对 token 文件真的能连上 bridge(启动日志有来源);
    缺 token 时启动 warn + pet_status 提示行 + 说话报可读错误(不崩、不假装能聊)
 ✔ 分发自查:发布白名单/源码/模板无私有值;默认 patch 未写死部署字段;config-bundle 是模板;打包白名单合理
+✔ v0.4.2:设置引用「刚导入(zip 落盘)」的 pack → 自动重扫并采用(形象包 2→3、figure 变化、/api/figures 同步);
+   重扫后仍未知的 figure → 保留当前 + warn,不丢已加载的包
 
-ℹ tests 47  ℹ pass 47  ℹ fail 0   (~4.8s)
+ℹ tests 48  ℹ pass 48  ℹ fail 0   (~6s)
 ```
 
 > 真实部署数据目录只读验证（2026-10-28）：扫描 `<dataDir>/web` 得到
@@ -582,7 +602,7 @@ v1.1 的**心情刷新/自动轮询/失败保留旧值/超时/stop 清定时器/
    4. `node --check lib/impl.js && node --test test/brain-remote.test.mjs test/mood.test.mjs test/pet-diy.test.mjs test/impl-remote.test.mjs`；
    5. 上游若自己也实现了 `remote`：优先对齐它的配置名（`bridgeUrl`/`bridgeTokenFile`/`bridgeSessionId`），
       把本 fork 的 `brain-remote.mjs` / `mood.mjs` / `figures.mjs` / `pet-settings.mjs` 当参考实现收进上游 PR（上游是 MIT，允许）。
-- **版本号策略**：`0.4.x-remote.N`（当前 `0.4.1-remote.1` = v1 远程大脑 + v1.1 心情 + v1.2 DIY + v0.4.1 分发通用化）；
+- **版本号策略**：`0.4.x-remote.N`（当前 `0.4.2-remote.1` = v1 远程大脑 + v1.1 心情 + v1.2 DIY + v0.4.1 分发通用化 + v0.4.2 导入 pack 重扫修复）；
   上游每跟一个版本，把前缀跟到上游 minor（如上游 0.3.x → 我们 0.4.1-remote.2）。
 - **不要**把本 fork 发布到 DSH STORE（bundle id/包名与上游不同是刻意的，但仍属个人 fork）。
 - `dev/NOTES.md` 仍是上游的踩坑记录（尤其第 1/2/3/4/5/14 条与本次改动相关），继续有效。
@@ -678,7 +698,7 @@ lib/assets.mjs               上游未改(复制来的 web 由 figures.mjs 追�
 lib/coo.mjs                  上游未改(Coo 控制台通道)
 lib/ws.mjs                   上游未改(零依赖 WS 服务端,测试复用)
 cordis.patch.yml             ★ 改:通用默认(brain: remote + bridge*/mood*/scale 等);部署路径全部不写(#占位)
-package.json                 ★ 改:包名/版本(0.4.1-remote.1)/test/test:remote/files
+package.json                 ★ 改:包名/版本(0.4.2-remote.1)/test/test:remote/files
 test/                        ★ 新:mock bridge(含 /mood) + 5 个测试文件(含 distribution 自查) + dsh-tools 替身
 config-bundle/               ★ 新:本地配置覆盖模板(+README),填占位后用,**不随包发布**
 dev/remote-probe.mjs         ★ 新:独立探针(--self-test 可离线自测;token 走参数/env)

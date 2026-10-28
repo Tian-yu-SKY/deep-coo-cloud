@@ -2,7 +2,7 @@
 
 > 本文件是**通用安装说明**（不包含任何某台机器的路径/服务器/账号信息）。
 > 改了什么、原理与已知限制见 [REMOTE-BRAIN.md](REMOTE-BRAIN.md)；打包/分发注意见 [DISTRIBUTION.md](DISTRIBUTION.md)。
-> **当前版本：`0.4.1-remote.1`。**
+> **当前版本：`0.4.2-remote.1`。**
 
 ---
 
@@ -130,7 +130,7 @@ plugin_manager { action: "set_bundle", target: "dsh-coo-pet-remote", enabled: tr
 
 ```text
 桌宠窗口 / 气泡连接 / 她的大脑(remote 连接状态) / 外观 / 界面 / 形象包 / DIY 设置 /
-心情 / 聊天开关 / 插件:dsh-coo-pet-remote v0.4.1-remote.1
+心情 / 聊天开关 / 插件:dsh-coo-pet-remote v0.4.2-remote.1
 ```
 
 只有需要重启的情况：换了包名/bundle id、DSH 自身升级、或 profile 处于半写坏状态。
@@ -193,9 +193,10 @@ plugin_manager { action: "set_bundle", target: "dsh-coo-pet-remote", enabled: tr
 | 窗口在但画面透明/没有鲸鱼 | Chromium 档案抢 GPU 缓存 | 确认 `CORTICO_COMPANION_DATA` 指向 `<dataDir>`；删 `<dataDir>/pet-window` 重开；查 `[桌宠窗口]` 日志 |
 | 说话报「连不上本机 bridge」 | bridge 没跑 / 端口不对 / token 不对 | `curl <bridgeUrl>/health`；核对 `bridgeUrl`；按 §2.2 配 token |
 | 说话报「还没拿到 bridge token」 | 没配 `bridgeTokenFile`/`bridgeToken`，或文件不存在/空 | 先启动 bridge 生成 token，再按 §2.2 配；配好后不用重启 DSH（下次连接会重读） |
-| `pet_status` 没有「心情:」行 | 还是旧版本代码 | 热重载（§3）；确认版本行 `v0.4.1-remote.1` |
+| `pet_status` 没有「心情:」行 | 还是旧版本代码 | 热重载（§3）；确认版本行 `v0.4.2-remote.1` |
 | `心情: 未知（bridge 未提供）` | bridge 端没有 `/mood`（旧版）/ 远端无心情数据 | 升级/重启 bridge；或先不管，聊天不受影响 |
 | `pet_status` 形象包只有 1 个 | 旧版本 / web 下没有其他 pack | 热重载；确认 `<dataDir>/web/*/figure.json` 与本机 Coopanion 的 `web/` |
+| 面板/ZIP 导入 pack 后保存 `figure` 不生效 | v0.4.2 之前的 bug（靠 warning 文案触发重扫，文案改后失效） | 确认版本行 `v0.4.2-remote.1` 并热重载；v0.4.2 起保存设置后会自动重扫 `web/*/figure.json`（~1s），重扫后仍找不到会保留当前并 warn |
 | 用户 pack 不出现 | 放错层级 / `figure.json` 坏 / id 不合法 / `web/<id>` 已存在 | 检查 `<cooDataRoot>/figures/<id>/figure.json` 或 `<dataDir>/figures/<id>/`；`id` 要求 `[a-z0-9][a-z0-9-]*`；看启动日志 `形象包 N 个` 与 `/api/figures/status` 的 `problems`；重载插件 |
 | `pet-settings.json` 改了没生效 | 不是合法 JSON / 字段名错 / 值非法被忽略 | 看 DSH 日志 `[桌宠] DIY 设置:` warning；确认 `pet_status` 里「DIY 设置:」指向的就是你改的文件（`settingsFile`） |
 | 换装页保存后外观回退 | 设置文件与换装页并发写（后写者赢） | 重新保存一次；或直接手改 `pet-settings.json`（它有合并/校验） |

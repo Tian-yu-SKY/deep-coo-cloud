@@ -343,6 +343,25 @@ export async function setup(ctx, config = {}) {
     return PACKS;
   };
 
+  /**
+   * 设置/换装页里的 figure 是否已安装；不在就先 `reloadPacks()`（用户可能刚通过 zip 导入、
+   * 或把包复制进 `figures/`），重扫后再判断一次。
+   *
+   * **语义判断，不看 warning 文案** —— 之前这里靠 warnings 里是否含「未知形象包」来触发重扫，
+   * 后来 warning 文案改成「不是已安装的形象包…」，条件永远不成立，于是 zip 导入的新 pack
+   * 虽然落盘/面板可见，保存设置后插件却不采用（真机 bug；v0.4.2 修）。
+   *
+   * @param {unknown} figure pack id
+   * @returns {boolean} 重扫后该 pack 是否存在
+   */
+  const ensurePackKnown = (figure) => {
+    if (typeof figure !== 'string' || !figure) return false;
+    if (PACKS.some((pack) => pack.id === figure)) return true;
+    log(`设置引用了尚未加载的形象包「${figure}」，重新扫描形象包…`);
+    reloadPacks();
+    return PACKS.some((pack) => pack.id === figure);
+  };
+
   /* ---------- DIY 设置(pet-settings.json,~1s 热应用)---------- */
   /**
    * 单一事实来源。换装页 `/dress`、鲸歌面板「桌宠 DIY」、以及本插件自己都只改这一份;
@@ -383,15 +402,17 @@ export async function setup(ctx, config = {}) {
 
   const initialFile = readSettingsFile();
   let rawSettings = initialFile.raw ?? {};
+  // 语义前置:设置/旧 skin.json/Config 里如果引用了还没扫到的 pack(例如刚导入),
+  // 先重扫一次再 normalize —— 不依赖 warning 文案。
+  const figureHint = [
+    isPlainObject(initialFile.raw?.skin) ? initialFile.raw.skin.figure : undefined,
+    isPlainObject(savedSkin) ? savedSkin.figure : undefined,
+    isPlainObject(config.skin) ? config.skin.figure : undefined,
+  ].find((value) => typeof value === 'string' && value);
+  if (figureHint) ensurePackKnown(figureHint);
   let normalization = initialFile.raw
     ? normalizeSettings(initialFile.raw, { packs: PACKS, scaleRange })
     : settingsFromConfig(config, { savedSkin, packs: PACKS, scaleRange });
-  if ((normalization.warnings ?? []).some((warning) => warning.includes('未知形象包'))) {
-    reloadPacks(); // 用户包可能是刚放进去的
-    normalization = initialFile.raw
-      ? normalizeSettings(initialFile.raw, { packs: PACKS, scaleRange })
-      : settingsFromConfig(config, { savedSkin, packs: PACKS, scaleRange });
-  }
   for (const warning of normalization.warnings ?? []) ctx.logger?.warn?.('[桌宠]', `DIY 设置:${warning}`);
 
   let SETTINGS = normalization.settings;
@@ -454,11 +475,14 @@ export async function setup(ctx, config = {}) {
   const applySettings = (next, { reason = '', resolved = null, persistSkin = true } = {}) => {
     SETTINGS = next;
     PREF = uiPrefsOf(next); // eslint-disable-line prefer-const
-    let result = resolved ?? resolveSkin(next.skin, PACKS);
-    if ((result?.warnings ?? []).some((warning) => warning.includes('未知形象包'))) {
-      reloadPacks(); // 面板刚复制/新装了包
-      result = resolveSkin(next.skin, PACKS);
+    // 语义判断:设置的 figure 不在 PACKS → 先重扫(reloadPacks)再解析;此时传进来的
+    // `resolved` 是按旧 PACKS 算的,必须丢弃重算,否则会应用回退结果。
+    const figure = typeof next?.skin?.figure === 'string' ? next.skin.figure : '';
+    if (figure && !PACKS.some((pack) => pack.id === figure)) {
+      ensurePackKnown(figure);
+      resolved = null;
     }
+    let result = resolved ?? resolveSkin(next.skin, PACKS);
     const skinChanged = JSON.stringify(SKIN) !== JSON.stringify(result.pageSkin);
     RESOLVED_SKIN = result;
     SKIN = result.pageSkin;
@@ -490,19 +514,19 @@ export async function setup(ctx, config = {}) {
       ctx.logger?.warn?.('[桌宠]', 'pet-settings.json 不是对象(这次忽略)');
       return;
     }
-    // 未知 figure 就保留当前(而不是悄悄换成别的包):无效值按「忽略」处理
-    if (isPlainObject(raw.skin) && typeof raw.skin.figure === 'string' && !PACKS.some((pack) => pack.id === raw.skin.figure)) {
-      ctx.logger?.warn?.('[桌宠]', `pet-settings.json 的 figure「${raw.skin.figure}」不是已安装的形象包,保留当前 ${SETTINGS.skin.figure}`);
-      raw = { ...raw, skin: { ...raw.skin, figure: SETTINGS.skin.figure } };
+    // 语义判断(不是文案判断):figure 不在 PACKS → 先重扫一次(zip 导入的 pack 刚落盘);
+    // 重扫后仍找不到才保留当前 figure 并 warn(无效值按「忽略」处理)。
+    if (isPlainObject(raw.skin) && typeof raw.skin.figure === 'string' && raw.skin.figure) {
+      const figure = raw.skin.figure;
+      if (!ensurePackKnown(figure)) {
+        ctx.logger?.warn?.('[桌宠]', `pet-settings.json 的 figure「${figure}」不是已安装的形象包(已重新扫描),保留当前 ${SETTINGS.skin.figure}`);
+        raw = { ...raw, skin: { ...raw.skin, figure: SETTINGS.skin.figure } };
+      }
     }
     lastSettingsText = text;
     rawSettings = raw;
     // 传上一份设置当 fallback:文件里没写的字段沿用当前,写错的值「忽略」而不是重置成出厂默认
-    let normalized = normalizeSettings(raw, { packs: PACKS, scaleRange, fallback: SETTINGS });
-    if ((normalized.warnings ?? []).some((warning) => warning.includes('未知形象包'))) {
-      reloadPacks();
-      normalized = normalizeSettings(raw, { packs: PACKS, scaleRange, fallback: SETTINGS });
-    }
+    const normalized = normalizeSettings(raw, { packs: PACKS, scaleRange, fallback: SETTINGS });
     for (const warning of normalized.warnings ?? []) ctx.logger?.warn?.('[桌宠]', `DIY 设置:${warning}`);
     settingsApplying = true;
     try {
@@ -608,6 +632,12 @@ export async function setup(ctx, config = {}) {
 
   /** 换装页 `/api/skin` 保存的外观(页面 skin 形状)→ 合并进 DIY 设置并应用。 */
   const onDressSkin = (nextSkin) => {
+    // 语义判断:换装页可能刚从「导入形象包」里选了一个新 pack → 先重扫再解析
+    const figure = typeof nextSkin?.figure === 'string' ? nextSkin.figure : '';
+    if (figure && !ensurePackKnown(figure)) {
+      ctx.logger?.warn?.('[桌宠]', `换装页选的 figure「${figure}」不是已安装的形象包(已重新扫描),保留当前 ${SETTINGS.skin.figure}`);
+      return;
+    }
     const decoded = decodePageSkin(nextSkin, PACKS);
     if (!decoded) {
       ctx.logger?.warn?.('[桌宠]', '换装页保存的外观解析不了,这次忽略');

@@ -1,6 +1,6 @@
 # dsh-coo-pet
 
-> **本目录是 fork：`dsh-coo-pet-remote` 0.4.1-remote.1（通用/可分发版）。**
+> **本目录是 fork：`dsh-coo-pet-remote` 0.4.2-remote.1（通用/可分发版）。**
 > 在官方 v0.2.1 的 `local` / `session` 两种大脑之外新增了 **`brain: remote`**：
 > 这只桌宠只当显示器，对话跑在**远端 DSH 的会话**里（经本机 **bridge** 的 WebSocket），
 > 角色卡/记忆/心情都以远端那一份为准。**不内置任何本机路径**：Coopanion 自动探测，

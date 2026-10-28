@@ -82,7 +82,7 @@ npm pack --dry-run
 ## 5. 版本 / 命名 / 兼容
 
 - 包名：`dsh-coo-pet-remote`（与 bundle entry id 一致，DSH 安装契约要求全局唯一）；
-- 版本：`0.4.x-remote.N`（当前 `0.4.1-remote.1`）；
+- 版本：`0.4.x-remote.N`（当前 `0.4.2-remote.1`）；
 - `engines.node >= 22.13`；`peerDependencies: @deepseek-ai/dsh-tools`（DSH 宿主提供）；
 - `dsh.bundle.patch: ./cordis.patch.yml`（DSH bundle 挂载入口）；
 - 升级发布建议在 `CHANGELOG`/GitHub release 里说明「上游 base commit」与 fork 差异（见 `REMOTE-BRAIN.md` §5）。

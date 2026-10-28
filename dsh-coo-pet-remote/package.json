@@ -1,6 +1,6 @@
 {
   "name": "dsh-coo-pet-remote",
-  "version": "0.4.1-remote.1",
+  "version": "0.4.2-remote.1",
   "description": "dsh-coo-pet 的 fork：在原有 local / session 两种大脑之外新增 brain: remote——桌宠通过本机 bridge 的 WebSocket 使用远端 DSH 的会话当大脑（同一份角色卡 / 记忆 / 心情）。v1.1 显示 bridge 的心情（GET /mood）；v1.2 支持多形象包（内置 coo/whale、用户/Workshop pack）与 pet-settings.json 的 DIY 设置（外观各轴 / 大小 / 气泡 / 主题等，~1s 热应用）。Requires Coopanion to be installed, and a running bridge instance (protocol v1/v1.1) for remote mode. All deployment-specific paths are auto-detected or configured by the user; nothing machine-specific is baked in.",
   "keywords": [
     "dsh-plugin",
