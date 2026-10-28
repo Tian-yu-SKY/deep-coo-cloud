@@ -208,8 +208,41 @@ const DEFAULT_DOCK = {
  */
 export function patchStageDock(src, dock) {
   if (typeof src !== 'string' || !src) return { text: src, notes: ['地板图标:源码为空,跳过'] };
-  if (src.includes('dsh-floor-style') || src.includes('data-action="panel"')) {
-    return { text: src, notes: ['地板图标:已有'] };
+  const toastHelper = [
+    '  const dshFloorToast = (text) => {',
+    "    let el = document.getElementById('dsh-floor-toast');",
+    '    if (!el) {',
+    "      el = document.createElement('div');",
+    "      el.id = 'dsh-floor-toast';",
+    "      el.style.cssText = 'position:fixed;left:50%;top:16px;transform:translateX(-50%);z-index:99999;background:rgba(20,26,36,.92);color:#fff;font:13px/1.5 system-ui,sans-serif;padding:8px 14px;border-radius:8px;box-shadow:0 6px 24px rgba(0,0,0,.35);pointer-events:none;opacity:0;transition:opacity .15s';",
+    '      document.body.append(el);',
+    '    }',
+    "    el.textContent = String(text ?? '');",
+    "    el.style.opacity = '1';",
+    '    clearTimeout(el._t);',
+    "    el._t = setTimeout(() => { el.style.opacity = '0'; }, 2600);",
+    '  };',
+  ].join('\n');
+  const hasV1 = src.includes('dsh-floor-style') || src.includes('data-action="panel"');
+  if (hasV1 && src.includes('dsh-floor-toast')) return { text: src, notes: ['地板图标:已有'] };
+  if (hasV1) {
+    // v0.4.3 的老补丁没有点击反馈:只把 fetch 那两行换成带头 toast 的版本(不动其它结构)
+    const v1Fetch = [
+      "      fetch('/api/dock', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action }) })",
+      "        .catch((err) => console.warn('[dsh-coo-pet] floor action failed', action, err));",
+    ].join('\n');
+    if (!src.includes(v1Fetch)) return { text: src, notes: ['地板图标:旧补丁升级锚点没找到,跳过'] };
+    const v2Fetch = [
+      toastHelper,
+      "      fetch('/api/dock', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action }) })",
+      "        .then((res) => res.json().catch(() => ({})))",
+      "        .then((data) => {",
+      "          if (data && data.message) dshFloorToast(data.message);",
+      "          else if (data && data.ok === false) dshFloorToast('操作失败');",
+      '        })',
+      "        .catch((err) => { console.warn('[dsh-coo-pet] floor action failed', action, err); dshFloorToast('操作失败: ' + (err && err.message ? err.message : err)); });",
+    ].join('\n');
+    return { text: src.replace(v1Fetch, v2Fetch), notes: ['地板图标:旧补丁已升级(点击有 toast 反馈)'] };
   }
   const notes = [];
   const config = {
@@ -229,11 +262,12 @@ export function patchStageDock(src, dock) {
     return { text: src, notes: ['地板图标:锚点没找到(floor.append 不在附近),跳过'] };
   }
   const replacement = [
-    '/* dsh-coo-pet dock patch v1:装饰图标 → 真按钮(只 POST /api/dock) */',
+    '/* dsh-coo-pet dock patch v2:装饰图标 → 真按钮(只 POST /api/dock,点击有 toast 反馈) */',
     '{',
     `  const ACTIONS = ${JSON.stringify(config.actions)};`,
     `  const LABELS = ${JSON.stringify(config.labels)};`,
     `  const STYLE = ${JSON.stringify(config.style)};`,
+    toastHelper,
     "  if (!document.getElementById('dsh-floor-style')) {",
     "    const style = document.createElement('style');",
     "    style.id = 'dsh-floor-style';",
@@ -249,7 +283,12 @@ export function patchStageDock(src, dock) {
     '      event.preventDefault();',
     '      event.stopPropagation();',
     "      fetch('/api/dock', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action }) })",
-    "        .catch((err) => console.warn('[dsh-coo-pet] floor action failed', action, err));",
+    "        .then((res) => res.json().catch(() => ({})))",
+    "        .then((data) => {",
+    "          if (data && data.message) dshFloorToast(data.message);",
+    "          else if (data && data.ok === false) dshFloorToast('操作失败');",
+    '        })',
+    "        .catch((err) => { console.warn('[dsh-coo-pet] floor action failed', action, err); dshFloorToast('操作失败: ' + (err && err.message ? err.message : err)); });",
     '    });',
     '  }',
     '  row.innerHTML = DOCK.map((shape, index) => {',
@@ -261,7 +300,6 @@ export function patchStageDock(src, dock) {
     '}',
   ].join('\n');
   let out = `${src.slice(0, start)}${replacement}${src.slice(appendIndex + appendAnchor.length)}`;
-  // aria-hidden 如果留着,里面的按钮在无障碍树里仍不可见 → 去掉(只针对 row 那一行)
   const ariaPatterns = [
     "  row.setAttribute('aria-hidden', 'true');\n",
     "row.setAttribute('aria-hidden', 'true');\n",
@@ -271,9 +309,10 @@ export function patchStageDock(src, dock) {
   const aria = ariaPatterns.find((pattern) => out.includes(pattern));
   if (aria) out = out.replace(aria, '');
   else notes.push('地板图标:aria-hidden 锚点没找到(按钮可能被无障碍树忽略)');
-  notes.push('地板图标:已换成按钮');
+  notes.push('地板图标:已换成按钮(点击有 toast 反馈)');
   return { text: out, notes };
 }
+
 
 /**
  * 源目录的「指纹」:整个 `web/` 的文件数 + 总字节 + 最新修改时间。
