@@ -223,8 +223,27 @@ export function patchStageDock(src, dock) {
     "    el._t = setTimeout(() => { el.style.opacity = '0'; }, 2600);",
     '  };',
   ].join('\n');
+  const hintBlock = [
+    '  /* dsh-floor-hint */',
+    '  if (!window.__dshDockHintShown) {',
+    '    window.__dshDockHintShown = 1;',
+    "    setTimeout(() => dshFloorToast('地板图标已启用：主程序 / 形象包目录 / 官网 / 邮箱 / 音效 / 面板'), 800);",
+    '  }',
+    "  console.log('[dsh-coo-pet] floor dock ready');",
+  ].join('\n');
   const hasV1 = src.includes('dsh-floor-style') || src.includes('data-action="panel"');
-  if (hasV1 && src.includes('dsh-floor-toast')) return { text: src, notes: ['地板图标:已有'] };
+  const hasToast = src.includes('dsh-floor-toast');
+  const hasHint = src.includes('dsh-floor-hint');
+  const hasPointer = src.includes("row.style.pointerEvents = 'auto'");
+  if (hasV1 && hasToast && hasHint && hasPointer) return { text: src, notes: ['地板图标:已有'] };
+  if (hasV1 && hasToast) {
+    // v0.4.4 老补丁:`.floor-icons` 在 pet.css 里 pointer-events:none,真鼠标点不到;
+    // CDP 的 .click() 能绕过,所以之前测出来了。补 pointer-events + 首次提示。
+    const anchor = '  row.innerHTML = DOCK.map((shape, index) => {';
+    if (!src.includes(anchor)) return { text: src, notes: ['地板图标:升级锚点没找到,跳过'] };
+    const fix = "  row.style.pointerEvents = 'auto';\n" + toastHelper + "\n" + hintBlock + "\n" + anchor;
+    return { text: src.replace(anchor, fix, 1), notes: ['地板图标:已修 pointer-events + 首次提示'] };
+  }
   if (hasV1) {
     // v0.4.3 的老补丁没有点击反馈:只把 fetch 那两行换成带头 toast 的版本(不动其它结构)
     const v1Fetch = [
@@ -242,7 +261,12 @@ export function patchStageDock(src, dock) {
       '        })',
       "        .catch((err) => { console.warn('[dsh-coo-pet] floor action failed', action, err); dshFloorToast('操作失败: ' + (err && err.message ? err.message : err)); });",
     ].join('\n');
-    return { text: src.replace(v1Fetch, v2Fetch), notes: ['地板图标:旧补丁已升级(点击有 toast 反馈)'] };
+    let upgraded = src.replace(v1Fetch, v2Fetch);
+    const rowAnchor = '  row.innerHTML = DOCK.map((shape, index) => {';
+    if (upgraded.includes(rowAnchor) && !upgraded.includes("row.style.pointerEvents = 'auto'")) {
+      upgraded = upgraded.replace(rowAnchor, "  row.style.pointerEvents = 'auto';\n" + toastHelper + "\n" + hintBlock + "\n" + rowAnchor, 1);
+    }
+    return { text: upgraded, notes: ['地板图标:旧补丁已升级(toast + pointer-events + 首次提示)'] };
   }
   const notes = [];
   const config = {
@@ -296,6 +320,8 @@ export function patchStageDock(src, dock) {
     '    const label = LABELS[index] || action;',
     "    return '<button type=\"button\" class=\"floor-action\" data-action=\"' + action + '\" title=\"' + label + '\" aria-label=\"' + label + '\">' + line(shape) + '</button>';",
     "  }).join('');",
+    "  row.style.pointerEvents = 'auto';",
+    hintBlock,
     '  floor.append(row);',
     '}',
   ].join('\n');

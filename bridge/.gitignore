@@ -8,3 +8,7 @@ tmp/
 test/tmp/
 dist/
 *.log
+# 进程锁 / 停止标记（运行期文件）
+supervisor.lock
+supervisor.stop
+bridge.start.lock

@@ -37,10 +37,18 @@ curl http://127.0.0.1:47891/health
 后台常驻：
 
 - **Windows**：双击 `start-bridge.vbs`（无窗口）；或 `start-bridge.cmd`（前台控制台）。
-- **登录自启**：`install-autostart.cmd`（写入 `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\dsh-link-bridge.vbs`，
-  无需管理员；`uninstall-autostart.cmd` 卸载）。
+- **自愈守护**：bridge 启动时会自动拉起 `supervisor.mjs`（detached，单实例）。守护每 10s 探一次
+  `GET /health`，bridge 崩溃 / 被 taskkill / 卡死无响应时自动重新拉起（默认 ~30s 内恢复）；
+  bridge 也会反过来保活守护。日志在 `logs/supervisor.log`。
+- **登录自启 + 重启后自动重连**：`install-autostart.cmd`（写入 `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\dsh-link-bridge.vbs`，
+  无需管理员；`uninstall-autostart.cmd` 卸载）。登录后 vbs → bridge → SSH 隧道 → 远端 DSH；
+  断网/服务器重启时 SSH 隧道自己有退避重连，物理重启后由登录自启恢复整条桥。
+- **主动停止**：`stop-bridge.cmd`（或 `node supervisor.mjs --stop`）——先停守护再停 bridge，
+  不会被守护又拉起来；下次登录/双击 `start-bridge.vbs` 再启动。
 - **Node 路径**：脚本按 `bridge/node-path.txt` → `%DSH_NODE_PATH%` → PATH 里的 `node` 顺序解析；
   若 node 不在 PATH，创建 `node-path.txt`（一行绝对路径）或设置环境变量。
+- **运行期锁文件**（可安全删除，勿手改）：`supervisor.lock`（守护单实例）、`bridge.start.lock`
+  （启动窗口互斥，防登录自启与守护重拉同时起两份）、`supervisor.stop`（停止标记，仅存在一瞬间）。
 
 ## 3. 配置字段（config.json）
 
@@ -123,3 +131,12 @@ node tools/build-dist.mjs
 - **端口被占用**：改 `apiPort` / `localTunnelPort`；bridge 首次启动会自动做单实例检查。
 - **中文 Windows 下启动脚本乱码**：自启 vbs 由 `tools/autostart.mjs` 以 UTF-16LE+BOM 生成，
   请不要手动用记事本另存为 UTF-8。
+- **关机/重启后桌宠「大脑」没连上**：按顺序查
+  1) 是否已登录桌面（自启只在登录后触发）；
+  2) `curl http://127.0.0.1:47891/health` 是否 200；不行看 `logs/bridge.log` 尾部；
+  3) `logs/supervisor.log` 是否有「已启动 bridge / 判定卡死」记录；
+  4) `ssh` 是否可免交互登录远端（`ssh -i <key> <user>@<host> true`）。
+  需要手动恢复时双击 `start-bridge.vbs` 即可（它会把守护一起拉起）。
+- **怎么确认守护在跑**：`bridge/supervisor.lock` 里的 pid 存活即可；日志 `logs/supervisor.log`。
+- **bridge 被 `taskkill /IM node.exe` 杀了怎么办**：守护会在 ~30s 内自动重拉；
+  若 node.exe 被整批杀掉（守护也死于同一刀），重新登录 / 双击 `start-bridge.vbs` 即可恢复。

@@ -1,6 +1,6 @@
 # dsh-coo-pet
 
-> **This directory is a fork: `dsh-coo-pet-remote` 0.4.4-remote.1 (portable/distributable build).**
+> **This directory is a fork: `dsh-coo-pet-remote` 0.4.5-remote.1 (portable/distributable build).**
 > On top of upstream v0.2.1's `local` / `session` brains it adds **`brain: remote`**:
 > this desktop pet is only a display; the conversation runs in a **remote DSH session**
 > through a local **bridge** WebSocket, so the role card / memory / mood all come from the remote side.

@@ -32,7 +32,8 @@ const [command] = process.argv.slice(2)
 if (command === 'install') {
   try {
     mkdirSync(STARTUP_DIR, { recursive: true })
-    writeFileSync(VBS_PATH, VBS_CONTENT, 'utf8')
+    // UTF-16LE + BOM：路径含中文，WSH 按 ANSI 读会乱码 → 自启静默失效。
+    writeFileSync(VBS_PATH, Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(VBS_CONTENT, 'utf16le')]))
     console.log(`installed: ${VBS_PATH}`)
     console.log(`launch: "${NODE}" "${SYNC_SCRIPT}" --loop`)
   } catch (error) {

@@ -62,6 +62,7 @@ export class SshManager {
     this.portBumps = 0;
     this._readyWaiters = [];
     this._spawnedAt = 0;
+    this._spawnErrorRetry = false;
   }
 
   get target() {
@@ -98,13 +99,25 @@ export class SshManager {
       this.log.warn(`ssh: ${text}`);
     });
     child.on('error', (error) => {
+      // spawn 失败（典型：登录早期 ssh 不在 PATH）不会触发 'exit'，这里补一次带退避的重连，
+      // 否则隧道会永远起不来。若 'exit' 也触发，由 _spawnErrorRetry 标记避免双重重连。
       this.log.error(`ssh spawn failed: ${error.message}`);
+      this.tunnelUp = false;
+      if (this.stopping || this._spawnErrorRetry) return;
+      this._spawnErrorRetry = true;
+      const delay = this.backoffMs;
+      this.backoffMs = Math.min(this.backoffMs * 2, 30000);
+      this.log.warn(`ssh 无法启动；${delay}ms 后重试`);
+      setTimeout(() => {
+        this._spawnErrorRetry = false;
+        if (!this.stopping) this._spawnTunnel();
+      }, delay);
     });
     child.on('exit', (code, signal) => {
       const lifetime = Date.now() - this._spawnedAt;
       if (this.child === child) this.child = null;
       this.tunnelUp = false;
-      if (this.stopping) return;
+      if (this.stopping || this._spawnErrorRetry) return;
       // 端口被占用 / 转发失败：协议要求自增端口重试。
       if (lifetime < 8000 && /Address already in use|bind|forwarding|Permission denied|Cannot listen/i.test(stderrTail) && this.portBumps < 20) {
         this.portBumps += 1;

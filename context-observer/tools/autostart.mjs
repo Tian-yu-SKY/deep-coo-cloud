@@ -72,7 +72,10 @@ if (action === 'install') {
     process.exit(1);
   }
   mkdirSync(STARTUP_DIR, { recursive: true });
-  writeFileSync(TARGET_FILE, vbs(), 'ascii');
+  // UTF-16LE + BOM：路径含中文，WSH 只有见到 BOM 才按 Unicode 解析；写成 'ascii' 会把中文变成 '?'，
+  // 自启静默失效（这是本机 2026-10-28 实际踩到的坑）。
+  const vbsText = vbs();
+  writeFileSync(TARGET_FILE, Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(vbsText, 'utf16le')]));
   console.log(`[OK] autostart installed: ${TARGET_FILE}`);
   console.log(`[INFO] observer dir: ${OBSERVER_DIR}`);
   process.exit(0);

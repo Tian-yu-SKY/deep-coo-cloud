@@ -4,16 +4,19 @@
 // 职责：独家持有服务器 DSH 鉴权与 SSH 隧道，向本机 Coo 桌宠 / 「鲸歌」面板提供
 //       /health /state /say /chat(WS) /mood /history /events(WS) 接口；
 //       角色卡只读注入；forbiddenSessionIds 红线。
-// 运行：node bridge/server.mjs [--once] [--config <path>]
+// 运行：node bridge/server.mjs [--once] [--config <path>] [--supervised] [--no-supervisor]
+// 守护：启动时自举 supervisor.mjs（崩溃/被杀/卡死自动拉起；登录自启后由它负责常驻）。
 // 环境：本机内置 node v24（全局 fetch / WebSocket / crypto），无 npm 依赖。
 // 安全：只监听 listenHost(127.0.0.1)；secret/cookie/角色卡全文不进日志，不落盘。
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
+import { spawn } from 'node:child_process';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 
-import { loadConfig, DEFAULT_CONFIG_PATH } from './lib/config.mjs';
+import { BRIDGE_DIR, loadConfig, DEFAULT_CONFIG_PATH } from './lib/config.mjs';
 import { createLogger } from './lib/log.mjs';
+import { acquireProcLock, isProcessAlive, readProcLock, releaseProcLock } from './lib/proc-lock.mjs';
 import { SshManager, shQuote } from './lib/ssh.mjs';
 import { ApiError, DshClient, MuxFollower, runTurn } from './lib/dsh.mjs';
 import { MoodMonitor } from './lib/mood.mjs';
@@ -35,7 +38,25 @@ const optValue = (name, fallback = undefined) => {
 };
 const ONCE = hasFlag('--once');
 const CHECK_CONFIG = hasFlag('--check-config');
+const SUPERVISED = hasFlag('--supervised');
+const NO_SUPERVISOR = hasFlag('--no-supervisor') || process.env.DSH_BRIDGE_NO_SUPERVISOR === '1';
 const CONFIG_PATH = path.resolve(optValue('--config', DEFAULT_CONFIG_PATH));
+const SUPERVISOR_JS = path.join(BRIDGE_DIR, 'supervisor.mjs');
+const SUPERVISOR_LOCK_FILE = path.join(BRIDGE_DIR, 'supervisor.lock');
+const SUPERVISOR_STOP_FILE = path.join(BRIDGE_DIR, 'supervisor.stop');
+const START_LOCK_FILE = path.join(BRIDGE_DIR, 'bridge.start.lock');
+
+// ── 启动窗口互斥 ───────────────────────────────────────────────
+// 登录自启 / 守护重拉 / 手动启动 可能同时发生：先到先得，只允许一个 bridge 进入 bootstrap。
+// 监听成功后立即释放（之后的防双开由 detectRunningBridge 探测 /health 负责）。
+if (!ONCE && !CHECK_CONFIG) {
+  const startLock = acquireProcLock(START_LOCK_FILE, { staleMs: 180000 });
+  if (!startLock.acquired) {
+    console.log(`[dsh-link-bridge] 另一个 bridge 正在启动（pid=${startLock.holder?.pid ?? '?'}），本进程退出`);
+    process.exit(0);
+  }
+  process.on('exit', () => releaseProcLock(START_LOCK_FILE));
+}
 
 /** 读配置；缺失/占位/非法时给出可读提示并退出（不抛栈崩溃）。 */
 function loadConfigOrExit(file) {
@@ -153,6 +174,33 @@ const log = createLogger({
   maxBytes: cfg.maxLogBytes,
   level: process.env.BRIDGE_LOG_LEVEL || cfg.logLevel || 'info',
 });
+
+/**
+ * supervisor 自举：守护进程负责 bridge 崩溃 / 被杀 / 卡死后的自动拉起。
+ * - 单实例由 supervisor.lock 保证（已有守护在跑就直接复用，不起第二个）；
+ * - 每次调用都先看锁（进程死了锁会被 supervisor 自己回收），所以可以当保活用。
+ * @returns {number|null} 守护 pid（已存在或刚启动）
+ */
+function ensureSupervisor(reason) {
+  if (ONCE || CHECK_CONFIG || NO_SUPERVISOR) return null;
+  try {
+    const holder = readProcLock(SUPERVISOR_LOCK_FILE);
+    if (holder && isProcessAlive(holder.pid)) return holder.pid;
+    const child = spawn(process.execPath, [SUPERVISOR_JS, '--config', CONFIG_PATH], {
+      cwd: BRIDGE_DIR,
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+    });
+    child.on('error', (error) => log.warn(`supervisor 启动失败: ${error.message}`));
+    if (child.pid) child.unref();
+    log.info(`supervisor 已启动 pid=${child.pid ?? '?'}（${reason}）`);
+    return child.pid ?? null;
+  } catch (error) {
+    log.warn(`supervisor 启动失败: ${error.message}`);
+    return null;
+  }
+}
 
 const ssh = new SshManager(cfg, log);
 const client = new DshClient({ cfg, ssh, log });
@@ -804,6 +852,7 @@ function startHttpServer(port, attemptsLeft = 20) {
   server.listen(port, cfg.listenHost, () => {
     httpServer = server;
     runtime.apiPort = port;
+    releaseProcLock(START_LOCK_FILE); // bootstrap 窗口结束，正常防双开交给 /health 探测
     log.info(`bridge ready: http://${cfg.listenHost}:${port}  (tunnel 127.0.0.1:${ssh.port} -> ${cfg.serverHost}:${cfg.remoteDshPort})`);
     log.info(`ws chat: ws://${cfg.listenHost}:${port}/chat?token=<token.txt>`);
     log.info(`ws events: ws://${cfg.listenHost}:${port}/events?token=<token.txt>（follow: ${eventHub.info.followSessionIds.join(', ')}）`);
@@ -881,9 +930,13 @@ async function bootstrap() {
 }
 
 let retryTimer = null;
+let supervisorTick = 0;
 function startRetryLoop() {
   retryTimer = setInterval(async () => {
     if (runtime.stopping) return;
+    // 守护保活：每 6 次（约 60s）确认 supervisor 还活着；它若被误杀，bridge 自己把它拉回来。
+    supervisorTick += 1;
+    if (supervisorTick % 6 === 0) ensureSupervisor('keepalive');
     try {
       if (!ssh.tunnelUp) return; // ssh 自己会重连
       await ensureReady();
@@ -900,6 +953,13 @@ function shutdown(signal) {
   if (runtime.stopping) return;
   runtime.stopping = true;
   log.info(`bridge 退出 (${signal})`);
+  releaseProcLock(START_LOCK_FILE);
+  // 正常退出时给守护留停止标记，让它别把 bridge 又拉起来；硬杀（taskkill /F）不会走到这里 → 守护会重拉。
+  if (!ONCE && !NO_SUPERVISOR) {
+    try {
+      fs.writeFileSync(SUPERVISOR_STOP_FILE, `${JSON.stringify({ at: Date.now(), reason: `bridge-shutdown:${signal}` })}\n`);
+    } catch { /* ignore */ }
+  }
   if (retryTimer) clearInterval(retryTimer);
   try { dashboardService.stop(); } catch { /* ignore */ }
   try { eventHub.stop(); } catch { /* ignore */ }
@@ -951,6 +1011,12 @@ if (!ONCE) {
     log.info(`防双开：检测到已在运行的 bridge pid=${existing.pid} apiPort=${existing.apiPort}，本进程退出`);
     process.exit(0);
   }
+}
+
+// 拉起 supervisor 守护（崩溃 / 被杀 / 卡死后自动重拉 bridge；已有守护则复用）。
+if (!ONCE) {
+  try { fs.rmSync(SUPERVISOR_STOP_FILE, { force: true }); } catch { /* ignore */ }
+  ensureSupervisor(SUPERVISED ? 'bridge-start(supervised)' : 'bootstrap');
 }
 
 const ready = await bootstrap();

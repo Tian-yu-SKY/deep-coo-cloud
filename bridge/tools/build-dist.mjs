@@ -15,11 +15,13 @@ const TARGET = path.join(DIST_ROOT, 'dsh-link-bridge');
 // 允许进入分发的文件/目录（相对 bridge 目录）
 const INCLUDE_FILES = [
   'server.mjs',
+  'supervisor.mjs',
   'cli.mjs',
   'selftest.mjs',
   'config.example.json',
   'start-bridge.cmd',
   'start-bridge.vbs',
+  'stop-bridge.cmd',
   'install-autostart.cmd',
   'uninstall-autostart.cmd',
   'README.md',
