@@ -1,0 +1,181 @@
+{
+  "contract": "T17-qq-preview-v1",
+  "generatedAt": "2026-10-28T14:34:49.540Z",
+  "effectiveCfg": {
+    "qqPreviewMaxChars": 60,
+    "qqPreviewLineMaxChars": 60,
+    "qqPreviewMinTextChars": 4,
+    "qqPreviewMaxItems": 4,
+    "qqWindowMinutes": 90,
+    "qqPreviewIncludeSelf": true,
+    "qqPreviewGroup": true,
+    "qqPreviewGroups": [
+      "group:test-group"
+    ],
+    "qqPreviewChats": [
+      "private:test-chat"
+    ]
+  },
+  "rules": {
+    "lineMaxChars": 60,
+    "textMaxChars": 60,
+    "minTextChars": 4,
+    "maxItems": 4,
+    "timeFormat": "HH:MM = 该行第一条（较早）消息的 time（本地时区 +08:00）",
+    "pairRule": "A=最近非self（优先非占位）；B=最近self（优先非占位）；仅当 B.time > A.time 渲染 A→B；否则只写 A；无 A 有 B 只写 B",
+    "placeholderRule": "纯占位文本（[图片]/[表情]/[语音]/[视频]/[文件]/[转发]）选择时优先跳过",
+    "truncateRule": "正文先 clamp 到 60；整行>60 时反复缩较长一段末尾 1 字并补 …（每段最少 4 字，省略号不计）；两段都最小仍超→丢回复段；仍超→丢弃整行",
+    "orderRule": "私聊行在前，群聊行在后，同类型按最新消息时间降序；总行数 ≤4"
+  },
+  "cases": [
+    {
+      "name": "private-pair",
+      "input": {
+        "chat": "private",
+        "sender": "私聊",
+        "messages": [
+          {
+            "at": "2026-10-28T13:55:00.000Z",
+            "text": "你用别的方式跟我打个招呼",
+            "isSelf": false,
+            "sender": "私聊"
+          },
+          {
+            "at": "2026-10-28T13:56:00.000Z",
+            "text": "会自己来打招呼的",
+            "isSelf": true,
+            "sender": "我"
+          }
+        ]
+      },
+      "expect": "QQ 私聊 21:55 你：「你用别的方式跟我打个招呼」→ 我：「会自己来打招呼的」",
+      "length": 44
+    },
+    {
+      "name": "private-single-inbound",
+      "input": {
+        "chat": "private",
+        "sender": "私聊",
+        "messages": [
+          {
+            "at": "2026-10-28T13:50:00.000Z",
+            "text": "我这边只有一个分身呀",
+            "isSelf": true,
+            "sender": "我"
+          },
+          {
+            "at": "2026-10-28T13:58:00.000Z",
+            "text": "现在忙什么呢",
+            "isSelf": false,
+            "sender": "私聊"
+          }
+        ]
+      },
+      "expect": "QQ 私聊 21:58 你：「现在忙什么呢」",
+      "length": 21
+    },
+    {
+      "name": "private-self-only",
+      "input": {
+        "chat": "private",
+        "sender": "私聊",
+        "messages": [
+          {
+            "at": "2026-10-28T13:57:00.000Z",
+            "text": "另一边得让桌宠自己说",
+            "isSelf": true,
+            "sender": "我"
+          }
+        ]
+      },
+      "expect": "QQ 私聊 21:57 我：「另一边得让桌宠自己说」",
+      "length": 25
+    },
+    {
+      "name": "group-pair",
+      "input": {
+        "chat": "group",
+        "sender": "<sender>",
+        "messages": [
+          {
+            "at": "2026-10-28T13:52:00.000Z",
+            "text": "大家有空来玩呀",
+            "isSelf": false,
+            "sender": "<sender>"
+          },
+          {
+            "at": "2026-10-28T13:53:00.000Z",
+            "text": "我在呢，我在",
+            "isSelf": true,
+            "sender": "我"
+          }
+        ]
+      },
+      "expect": "QQ 群聊 21:52 <sender>：「大家有空来玩呀」→ 我：「我在呢，我在」",
+      "length": 44
+    },
+    {
+      "name": "long-truncate-single",
+      "input": {
+        "chat": "group",
+        "sender": "<sender>",
+        "messages": [
+          {
+            "at": "2026-10-28T13:58:00.000Z",
+            "text": "这是一条非常非常长的消息这是一条非常非常长的消息这是一条非常非常长的消息这是一条非常非常长的消息这是一条非常非常长的消息这是一条非常非常长的消息这是一条非常非常长的消息这是一条非常非常长的消息这是一条非常非常长的消息这是一条非常非常长的消息",
+            "isSelf": false,
+            "sender": "<sender>"
+          }
+        ]
+      },
+      "expect": "QQ 群聊 21:58 <sender>：「这是一条非常非常长的消息这是一条非常非常长的消息这是一条非常非常长的消…」",
+      "length": 60
+    },
+    {
+      "name": "long-truncate-pair",
+      "input": {
+        "chat": "private",
+        "sender": "私聊",
+        "messages": [
+          {
+            "at": "2026-10-28T13:55:00.000Z",
+            "text": "这是一条非常非常长的消息这是一条非常非常长的消息这是一条非常非常长的消息这是一条非常非常长的消息这是一条非常非常长的消息这是一条非常非常长的消息这是一条非常非常长的消息这是一条非常非常长的消息这是一条非常非常长的消息这是一条非常非常长的消息",
+            "isSelf": false,
+            "sender": "私聊"
+          },
+          {
+            "at": "2026-10-28T13:56:00.000Z",
+            "text": "这是一条非常非常长的消息这是一条非常非常长的消息这是一条非常非常长的消息这是一条非常非常长的消息这是一条非常非常长的消息这是一条非常非常长的消息这是一条非常非常长的消息这是一条非常非常长的消息这是一条非常非常长的消息这是一条非常非常长的消息",
+            "isSelf": true,
+            "sender": "我"
+          }
+        ]
+      },
+      "expect": "QQ 私聊 21:55 你：「这是一条非常非常长的消息这是一条非常…」→ 我：「这是一条非常非常长的消息这是一条非常…」",
+      "length": 60
+    },
+    {
+      "name": "group-placeholder-skip",
+      "input": {
+        "chat": "group",
+        "sender": "<sender>",
+        "messages": [
+          {
+            "at": "2026-10-28T13:57:00.000Z",
+            "text": "数据还挺少的",
+            "isSelf": false,
+            "sender": "<sender>"
+          },
+          {
+            "at": "2026-10-28T13:59:00.000Z",
+            "text": "[图片]",
+            "isSelf": false,
+            "sender": "<sender>"
+          }
+        ]
+      },
+      "expect": "QQ 群聊 21:57 <sender>：「数据还挺少的」",
+      "length": 30
+    }
+  ]
+}

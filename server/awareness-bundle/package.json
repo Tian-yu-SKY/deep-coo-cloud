@@ -1,0 +1,14 @@
+{
+  "name": "dsh-link-awareness",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "dsh-link Phase 5：服务器共享情境注入（本机情境快照 + QQ 近况 → 所有 agent 每轮 systemPrompt 运行时上下文）",
+  "main": "index.js",
+  "license": "MIT",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

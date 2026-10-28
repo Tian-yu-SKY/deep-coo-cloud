@@ -1,0 +1,49 @@
+# dsh-coo-pet-remote 的配置覆盖 bundle（**本地用模板**，不随插件发布）
+#
+# 这个包不含运行时代码，只提供一层 Loader 补丁：用同 id 覆盖
+# `dsh-coo-pet-remote` 插件行，把 **本机部署相关** 的值（Coopanion 位置、数据目录、
+# bridge token 文件等）从插件包默认值里拆出来。
+#
+# 使用方式（发布者/自用者）：
+#   1. 把本目录拷到**不会随插件发布**的位置（例如本机工作区里），按下面注释填值；
+#   2. 用 `plugin_manager install_bundle` 或 `dsh plugin add link:<该目录>` 安装；
+#   3. 它必须排在 `dsh-coo-pet-remote` **之后**（bundles 数组顺序靠后 = 覆盖层后应用）。
+#   4. 换机器/换路径只改这个包，不用改插件包。
+# ⚠️ 不要把填了本机路径的这份 bundle 发布到任何 registry / 分享给别人。
+#
+# 注意：id 覆盖会替换**整份** config，所以这里把要固定的字段全部列出；
+# 想要插件包的默认值就别写那个字段（但「同 id 覆盖」下最好写全，避免升级时语义漂移）。
+- id: dsh-coo-pet-remote
+  name: dsh-coo-pet-remote
+  config:
+    # ---- 通用行为（与插件包默认一致）----
+    autoStart: true
+    brain: remote
+    bridgeUrl: 'http://127.0.0.1:47891'
+    bridgeSessionId: pet-local
+    bridgeTimeoutMs: 240000
+    moodIntervalMs: 60000
+    moodTimeoutMs: 5000
+    scale: 2
+    scaleMin: 0.5
+    scaleMax: 3
+    chatRounds: 3
+
+    # ---- 本机部署相关：把 <...> 换成你自己的值（或整行删掉用自动探测）----
+    # Coopanion 安装目录；留空/删掉 = 自动探测（注册表 / 常见位置 / COOPANION_HOME）
+    # cooRoot: '<COOPANION_INSTALL_DIR>'
+    # petExe: '<COOPANION_INSTALL_DIR>/Coopanion.exe'
+    # cooDataRoot: '<COOPANION_INSTALL_DIR>/data'
+
+    # 她的数据目录；留空 = $DSH_HOME/dsh-coo-pet
+    # dataDir: '<DATA_DIR>'
+
+    # bridge token：绝对路径 / 相对 dataDir / ~ 都行；也可以直接给 bridgeToken
+    # bridgeTokenFile: '<BRIDGE_TOKEN_FILE>'
+    # bridgeToken: '<BRIDGE_TOKEN>'
+
+    # 额外的形象包根目录（可选）
+    # packsExtraDirs: ['<EXTRA_FIGURE_PACK_ROOT>']
+
+    # DIY 设置文件（可选；默认 <dataDir>/pet-settings.json）
+    # settingsFile: '<PET_SETTINGS_FILE>'

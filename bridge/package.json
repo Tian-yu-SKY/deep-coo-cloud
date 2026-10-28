@@ -1,0 +1,14 @@
+{
+  "name": "dsh-link-bridge",
+  "version": "2.2.0",
+  "private": true,
+  "type": "module",
+  "description": "Local bridge between pet/panel clients and a remote DSH server (HTTP + WebSocket).",
+  "scripts": {
+    "check": "node tools/run-tests.mjs --check-only",
+    "test": "node tools/run-tests.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

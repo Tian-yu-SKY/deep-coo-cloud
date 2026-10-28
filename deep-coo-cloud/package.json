@@ -1,0 +1,37 @@
+{
+  "name": "deep-coo-cloud",
+  "version": "2.0.0",
+  "private": true,
+  "description": "deep-coo-cloud：Coo 桌宠 × 云端 DSH 人格控制台。本机 DSH Web UI 合并版面板（聊天/总控台/设置/Coo 市场/桌宠 DIY），可配置侧栏名称/标题、桥接地址、服务器 SSH、QQ 白名单；不含任何本机私有信息。",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-ui-sidebar"
+      ]
+    }
+  }
+}

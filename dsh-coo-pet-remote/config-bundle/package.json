@@ -1,0 +1,16 @@
+{
+  "name": "@local/dsh-coo-pet-remote-config",
+  "version": "1.1.0",
+  "private": true,
+  "description": "dsh-coo-pet-remote 的本地配置覆盖模板：用同 id 覆盖插件行，填入本机的 Coopanion 位置 / dataDir / bridge token 文件等。⚠️ 填好后不要发布；必须装在 dsh-coo-pet-remote 之后（bundles 数组顺序靠后）。",
+  "type": "module",
+  "files": [
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

@@ -1,0 +1,29 @@
+deep-coo-cloud
+================
+
+This repository is a distribution bundle of the deep-coo-cloud project.
+
+Third-party components and materials:
+
+1. dsh-coo-pet (upstream desktop pet plugin)
+   - Repository: https://github.com/vortioxetine213/dsh-coo-pet
+   - License: MIT
+   - This repository contains a forked/remixed version of parts of that project
+     (the `dsh-coo-pet-remote/` directory), used with attribution.
+
+2. Coopanion / Cortico
+   - Repository: https://github.com/Pal-AI-Lab/Coopanion
+   - License: AGPL-3.0-or-later (application), with separate terms for some
+     bundled art assets.
+   - This repository does NOT redistribute Coopanion source code or art assets.
+     At runtime the plugin reads page assets and figure packs from the user's
+     own installed Coopanion directory (under the user's control), and does not
+     bundle them here.
+
+3. DeepSeek Harness (DSH)
+   - The plugin framework, client/server APIs, and related packages belong to
+     their respective authors.
+   - No DSH core source code is bundled in this repository.
+
+The MIT license in LICENSE applies only to code written by the
+deep-coo-cloud project. Third-party components remain under their own licenses.

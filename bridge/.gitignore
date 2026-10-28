@@ -1,0 +1,10 @@
+# 运行期私有数据（绝不提交 / 打包）
+config.json
+token.txt
+state.json
+node-path.txt
+logs/
+tmp/
+test/tmp/
+dist/
+*.log

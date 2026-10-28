@@ -1,0 +1,54 @@
+# dsh-link-awareness bundle patch（DSH 0.2.1-rc.2）
+#
+# 只插入一条 host 级插件行（不覆盖任何既有行）：它用 systemPrompt.context 把共享情境
+# 注入到所有 agent 的每轮运行时上下文。输入文件都是**只读**；本插件不写任何文件。
+#
+# 通用分发版（可部署到任何人的服务器）：
+#   · 不含任何私有 IP / 用户 / QQ 号 / 路径默认值；
+#   · 本机情境文件默认由插件解析为 `$DSH_HOME/shared-awareness.json`（未设 DSH_HOME 时 `~/.dsh/...`）；
+#   · QQ 相关的三个输入文件（qqActivityFile / socialFile / bridgeLogFile）**默认为空 = 不启用**，
+#     需要 QQ 预览/近况时，在下面 config 里填你自己的绝对路径，并自行配置白名单；
+#   · 如需覆盖本机情境文件路径，取消 contextFile 注释并改成你的绝对路径。
+- insert:
+    - id: dsh-link-awareness
+      name: dsh-link-awareness
+      config:
+        enabled: true
+        # 本机情境快照（默认 = $DSH_HOME/shared-awareness.json；一般不需要改）
+        # contextFile: <absolute-path-to-your-shared-awareness.json>
+        #
+        # ---- 可选：QQ 集成（默认全部关闭，空/缺省 = 不启用）----
+        # 例（换成你自己的绝对路径）：
+        # qqActivityFile: <your-path>/qq-bridge/state/qq-activity.log
+        # socialFile: <your-path>/qq-bridge/state/social-v2.json
+        # bridgeLogFile: <your-path>/qq-bridge/state/bridge.log
+        #
+        # 如启用 QQ 正文预览，需要显式给出会话白名单（key 形如 '<chatType>:<id>'）：
+        qqPreviewChats: []      # 例：['private:<your-qq>']
+        qqPreviewGroups: []     # 例：['group:<your-group-id>'] 或 'all'
+        qqPreviewGroup: false
+        qqPreviewIncludeSelf: false
+        qqIncludePreview: false
+        #
+        # ---- 本机情境 ----
+        maxAgeMinutes: 20
+        staleAfterMinutes: 30
+        contextMaxItems: 4
+        # ---- QQ 摘要时间窗口（仅在启用 QQ 输入时生效）----
+        qqWindowMinutes: 90
+        qqMaxItems: 3
+        qqPreviewMaxChars: 60
+        qqPreviewLineMaxChars: 60
+        qqPreviewMinTextChars: 4
+        qqPreviewMaxItems: 4
+        # ---- T20 跨端对话连续性（默认开；只用到本机/面板对话时不依赖 QQ）----
+        dialogueInclude: true
+        dialogueMaxItems: 10
+        dialogueMaxChars: 700
+        dialogueSurfaces: ['panel', 'qq-private', 'qq-group']
+        dialogueSourceMaxItems: 6
+        dialogueTextMaxChars: 80
+        # ---- 注入块与日志 ----
+        blockMaxChars: 1000
+        order: 903
+        logThrottleMs: 60000

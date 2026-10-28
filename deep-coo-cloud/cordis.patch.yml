@@ -1,0 +1,60 @@
+# 「鲸歌」合并版面板（T21）bundle patch —— 把插件挂进本机 DSH profile。
+#
+# Host 半（index.js）在 DSH Web 服务器上注册 /whale-panel/* 同源只读路由：
+#   GET  /whale-panel/config    返回 bridge 地址 / sessionId / WS 地址 / bridge token
+#   GET  /whale-panel/health    代理 bridge GET /health（连接状态轮询）
+#   GET  /whale-panel/history   代理 bridge GET /history（历史消息）
+#   POST /whale-panel/say       代理 bridge POST /say（发消息，阻塞到轮结束）
+# 「总控台」同源路由（T19）：
+#   GET  /control-center/status         聚合 bridge /dashboard（T18；缺失降级 /health+/mood+/context）
+#                                       + 本机组件文件/锁 + 四个登录自启 vbs + PAUSED 状态
+#   POST /control-center/pause-context  body {"paused":true|false} → 写/删 context-observer/PAUSED
+# T21 新增（合并版）：
+#   GET  /whale-panel/settings         本地 settings.json + 观察器状态 + ssh 只读服务器 awareness patch
+#   POST /whale-panel/settings         保存本地白名单设置
+#   POST /whale-panel/apply-awareness  二次确认后 ssh 写服务器 patch（只改 5 个 qqPreview* 键）+ 重启 dsh-web
+#   POST /whale-panel/open-directory   打开 dshLinkRoot（固定路径）
+# T23 新增（桌宠 DIY；依赖 coo-fork T22 0.4.0+）：
+#   GET  /whale-panel/pet-diy          读 coo-pet-data/pet-settings.json + 扫描 web/*/figure.json + skin.json
+#   POST /whale-panel/pet-diy          白名单校验后合并写 pet-settings.json（原子写+备份；插件 ~1s 热应用）
+# T24 新增（Coo 市场；只浏览，不安装/不执行扩展）：
+#   GET  /whale-panel/coo-market       npm search(text=cortico) 缓存 10min + 扫本机 Coopanion extensions 已安装列表
+# T25 新增（Coopanion 扩展下载；安装需二次确认）：
+#   POST /whale-panel/coo-market/download   下载 npm tarball 到 dsh-link/coo-extensions（≤200MB，校验 tar 条目，不执行）
+#   POST /whale-panel/coo-market/install    confirm:true 后用 Coopanion 自带 pnpm 安装到 extensions（需重启 Coopanion）
+#   POST /whale-panel/coo-market/open-dir   explorer 打开 coo-extensions 下载目录
+# Client 半（client.js）只注册一个 sidebar.panellist 入口（id=whale-chat 鲸歌）；面板内 Tab：聊天/总控台/设置。
+#
+# 为什么要有 /whale-panel/* 代理：浏览器 fetch 到 127.0.0.1:47891 是跨源请求，
+# 而 bridge 的 HTTP 接口没有 CORS 头（只有 WS /chat、/events 用 token 鉴权），
+# 所以由 Host 半代取/转发；WS /events 由浏览器直连 bridge，token 通过
+# /whale-panel/config 由 Host 半从 token 文件读取后转发（token 不落日志、不在 UI 显示）。
+#
+# 配置项（都有默认值；改这里后重载插件生效，不要手改 profile）：
+#   bridgeUrl   本机 bridge 的 HTTP 地址；**必须是回环地址**（默认 http://127.0.0.1:47891）
+#   tokenFile   bridge token 文件（默认 <dshLinkRoot>/bridge/token.txt）；也可用 token 直接给明文 token（两者都有时 token 优先）
+#   sessionId   服务器上的会话 id（默认 pet-local）
+#   healthTimeoutMs / historyTimeoutMs / sayTimeoutMs   各接口超时（毫秒）
+#   dshLinkRoot   工作区根（默认=插件目录上一级；总控台读组件状态/锁/自启文件与 PAUSED 用）
+#   startupDir   Startup 目录覆盖（空 = 当前用户 %APPDATA%/.../Startup）
+#   dashboardTimeoutMs  bridge /dashboard 超时（默认 6000ms）
+#   settingsFile        本地设置文件（空 = 插件目录 settings.json）
+#   serverSshHost/sshKey/sshKnownHosts  服务器 SSH（默认空=禁用；sshKey 默认 <dshLinkRoot>/.ssh/id_ed25519）
+#   awarenessPatchPath  服务器 patch 路径（只改 5 个 qqPreview* 键，保留其它键）
+#   remoteDshService    应用设置时重启的服务（默认 dsh-web）
+#   sshTimeoutMs/applyRestartWaitMs/awarenessCacheMs   ssh 超时/重启等待/配置读取缓存
+#   cooPetDataRoot/petSettingsFile/petSkinFile/petPacksDir  桌宠 DIY 路径（空 = dshLinkRoot/coo-pet-data 推导）
+#   cooMarketUrl/cooMarketCacheMs/cooMarketTimeoutMs/cooExtensionsDir   Coo 市场 npm 数据源/缓存/超时/本机扩展目录
+#   cooDownloadsDir/cooDownloadMaxBytes/cooDownloadTimeoutMs/cooTarPath/cooRoot/cooPnpmPath   下载目录/上限/超时/tar/Coopanion 根与 pnpm
+- insert:
+    - id: deep-coo-cloud
+      name: 'deep-coo-cloud'
+      # T26：默认值全部通用、不含任何本机/服务器私有信息；需要时在 profile 或 settings.json 覆盖：
+      #   bridgeUrl        本机 bridge 地址（默认 http://127.0.0.1:47891）
+      #   dshLinkRoot      工作区根（默认 = 插件目录的上一级）
+      #   ui.sidebarLabel  左侧栏名称（默认 鲸歌）；ui.panelTitle / ui.tabLabels 同理
+      #   serverSshHost    服务器 SSH 主机（默认空 = 不启用 SSH 功能）
+      #   awarenessPatchPath 服务器 awareness patch（默认空 = 不启用服务器 QQ 配置读写）
+      #   cooRoot           Coopanion 根（默认空 = 自动探测）
+      #   qqPreviewGroups/qqPreviewChats  QQ 白名单（默认空 = 不预览任何会话）
+      config: {}

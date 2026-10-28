@@ -1,0 +1,20 @@
+{
+  "_comment": "config.example.json — 复制为 config.json 后填你自己的值；不要把真实配置提交到公开仓库。所有键也可用对应环境变量（AWARENESS_*）或 CLI 参数覆盖，CLI 优先级最高。",
+  "bridgeBase": "http://127.0.0.1:47891",
+  "tokenFile": "<path-to-your-bridge-token-file>",
+  "sshHost": "<user>@<your-server>",
+  "sshKey": "<path-to-your-ssh-private-key>",
+  "sshBin": "",
+  "remoteFile": "<absolute-path-on-remote-server>/shared-awareness.json",
+  "remoteOwner": "<user>:<group>",
+  "remoteMode": "600",
+  "intervalMs": 30000,
+  "minWriteIntervalMs": 300000,
+  "requestTimeoutMs": 6000,
+  "retries": 2,
+  "retryDelayMs": 3000,
+  "historySession": "<your-dsh-session-id>",
+  "historyLimit": 8,
+  "dialogueTextMaxChars": 200,
+  "snapshotMaxBytes": 12288
+}

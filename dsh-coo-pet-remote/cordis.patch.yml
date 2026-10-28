@@ -1,0 +1,90 @@
+# DSH 桌宠 bundle patch —— 声明怎么把插件挂进 DSH。
+#
+# 这是 dsh-coo-pet 的 fork（dsh-coo-pet-remote）：在官方 local / session 两种大脑之外
+# 新增 `brain: remote`——她的对话跑在**远端 DSH**（或本机另一个 DSH）的会话里，本机这只
+# Coo 只当显示端，经本机 bridge 的 WebSocket（协议 v1）收发；角色卡 / 记忆 / 心情都以
+# bridge 另一端那一份为准，本机不落任何服务器数据。
+# 上游仓库：https://github.com/vortioxetine213/dsh-coo-pet （MIT）
+#
+# 先决条件（二选一）：
+#   A. 只想用 remote：装好 Coopanion + 在本机跑起 bridge 并生成它的 token，然后把
+#      `bridgeTokenFile`（桥的 token 文件，绝对路径 / 相对 dataDir / ~ 都行）或
+#      `bridgeToken`（直接给明文）配进本插件的 Config（见下方注释示例）。
+#      没配 token 时插件会给清晰提示，不会假装能用。
+#   B. 不想用 remote：把 `brain` 改成 `local`（插件内自建会话，只调 DSH 的 llm）或
+#      `session`（本机 DSH 的一个独立会话）。这样不需要 bridge。
+#
+# 找不到 Coopanion 时插件会依次尝试：Config 的 `cooRoot` → Windows 注册表 →
+# 常见安装位置 → 环境变量 `COOPANION_HOME`；都没有才需要显式配置 `cooRoot` / `petExe`。
+#
+# 配置项（都有默认值 / 自动探测，一般不用写）：
+#   cooRoot      Coopanion 安装目录（默认自动探测）
+#   petExe       Coopanion.exe 路径（默认 <cooRoot>/Coopanion.exe）
+#   cooDataRoot  Coopanion 的 data 目录（默认 <cooRoot>/data，用来读它的控制台端口与 bot 名字）
+#   cooPort      覆盖 Coopanion 控制台端口（默认自动读）
+#   user         桌宠对你的称呼
+#   dataDir      她的数据（素材副本、DIY 设置、皮肤、窗口档案）放哪。
+#                默认 `$DSH_HOME/dsh-coo-pet` —— 在插件包外面，升级不会删。
+#   autoStart    装上就让她上桌（默认 true）
+#   port         桌宠页面服务器端口（默认让系统分配一个）
+#   brain        她的大脑用哪一种：
+#                remote  = （本 fork 默认）远端 DSH 的会话，经本机 bridge 的 WebSocket；
+#                          需要 bridge 在跑 + token 已配置；
+#                local   = 插件内自己维护的独立会话，只调 llm——轻、快、省 token；
+#                session = 本机 DSH 里的一个独立会话（原生持久化），但每轮会带上 preset
+#                          的完整系统提示与工具定义，明显更费 token。
+#   bridgeUrl         remote 用：bridge 的本地 HTTP 地址（默认 http://127.0.0.1:47891）
+#   bridgeTokenFile   remote 用：bridge token 文件。**默认空 = 未配置**，此时请二选一：
+#                     绝对路径，或相对 `dataDir` 的路径，或 `~/...`；也可以设环境变量
+#                     `DSH_COO_PET_BRIDGE_TOKEN_FILE` 兜底。
+#   bridgeToken       remote 用：直接给明文 token（优先于 bridgeTokenFile）
+#   bridgeSessionId   remote 用：bridge 另一端给这只桌宠用的会话 id（只用于状态显示，默认 pet-local）
+#   bridgeTimeoutMs   remote 用：一轮最多等多久（默认 240000 ms）
+#   moodIntervalMs    remote 用：多久刷一次 bridge 的心情 GET /mood（默认 60000 ms；
+#                     0 = 不自动刷新，只在挂载时刷一次）
+#   moodTimeoutMs     remote 用：单次 GET /mood 超时（默认 5000 ms）
+#   skin         她的初始形象与配色（v1.2 起只用于**首次生成默认设置**；之后以
+#                dataDir/pet-settings.json 为准，换装页/「桌宠 DIY」面板改的都是那份）：
+#                figure 形象包 id：whale（默认）/ coo，用户或 Workshop 包也能填
+#                scheme / outfit / palette / head / side / glasses / neck = 该 pack 的轴值，
+#                具体可选项见对应 pack 的 figure.json（换装页会动态渲染）
+#   chatRounds   桌宠身上那个按钮、以及 /pet-chat 不带数字时的默认来回数
+#   scale        桌宠初始大小（默认 2；实际值以 pet-settings.json 的 scale 为准）
+#   scaleMin/scaleMax  允许的大小范围（默认 0.5 / 3；超出会被 clamp）
+#   settingsFile DIY 设置文件路径（默认 <dataDir>/pet-settings.json）
+#   packsExtraDirs 额外的形象包根目录（默认还会自动加 <cooDataRoot>/figures、
+#                <dataDir>/figures，以及环境变量 COOPANION_PACK_ROOTS 里的根）。
+#                每个根下的一级目录 = 一个含 figure.json 的形象包。
+#
+# 注意：本插件的 bundle entry id 必须全局唯一、且与包名一致（DSH 安装契约），
+# 所以从上游的 `dsh-coo-pet` 改成了 `dsh-coo-pet-remote`。装好之后想改配置，用「同
+# id 覆盖」的配置 bundle（见 INSTALL.md / config-bundle/），不要手改 profile。
+- insert:
+    - id: dsh-coo-pet-remote
+      name: dsh-coo-pet-remote
+      config:
+        autoStart: true
+        brain: remote
+        bridgeUrl: 'http://127.0.0.1:47891'
+        bridgeSessionId: pet-local
+        bridgeTimeoutMs: 240000
+        moodIntervalMs: 60000
+        moodTimeoutMs: 5000
+        # v1.2 DIY：初始外观（之后数据目录里的 pet-settings.json 说了算）+ 大小范围
+        skin:
+          figure: whale
+          scheme: harness
+          outfit: maid
+        scale: 2
+        scaleMin: 0.5
+        scaleMax: 3
+        chatRounds: 3
+        # ---- 以下默认留空 = 自动探测 / 使用默认位置；需要时取消注释并填自己的值 ----
+        # cooRoot: '<your Coopanion install dir>'
+        # petExe: '<your Coopanion install dir>/Coopanion.exe'
+        # cooDataRoot: '<your Coopanion install dir>/data'
+        # dataDir: '<your data dir>'              # 空 = $DSH_HOME/dsh-coo-pet
+        # bridgeToken: '<bridge token>'
+        # bridgeTokenFile: '<path to bridge token file>'   # 绝对 / 相对 dataDir / ~
+        # packsExtraDirs: ['<extra figure pack root>']
+        # settingsFile: '<path to pet-settings.json>'
