@@ -1,6 +1,6 @@
 # dsh-coo-pet
 
-> **本目录是 fork：`dsh-coo-pet-remote` 0.4.2-remote.1（通用/可分发版）。**
+> **本目录是 fork：`dsh-coo-pet-remote` 0.4.3-remote.1（通用/可分发版）。**
 > 在官方 v0.2.1 的 `local` / `session` 两种大脑之外新增了 **`brain: remote`**：
 > 这只桌宠只当显示器，对话跑在**远端 DSH 的会话**里（经本机 **bridge** 的 WebSocket），
 > 角色卡/记忆/心情都以远端那一份为准。**不内置任何本机路径**：Coopanion 自动探测，
@@ -9,6 +9,8 @@
 > v1.1 起 `pet_status` 会显示 bridge 的心情（`GET /mood`）、气泡动作跟着心情微调；
 > v1.2 起支持**多形象包**（内置 coo/whale + 用户/Workshop pack）与
 > `dataDir/pet-settings.json` 的 **DIY 设置**（外观各轴/大小/气泡/主题…，改文件 ~1s 热生效）。
+> v0.4.3 起换装页 `/dress` 地板上的 6 个装饰图标变成真按钮（面板/形象包目录/项目主页/邮箱/音效/聊天面板，
+> 只走白名单 `POST /api/dock`）。
 > 安装见 [INSTALL.md](INSTALL.md)；原理/限制见 [REMOTE-BRAIN.md](REMOTE-BRAIN.md)；
 > 打包见 [DISTRIBUTION.md](DISTRIBUTION.md)；下面仍是官方 README 原文。
 

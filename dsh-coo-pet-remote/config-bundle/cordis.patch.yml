@@ -47,3 +47,6 @@
 
     # DIY 设置文件（可选；默认 <dataDir>/pet-settings.json）
     # settingsFile: '<PET_SETTINGS_FILE>'
+
+    # 换装页「聊天气泡」按钮要打开的本机 DSH 面板地址（空 = 只提示不打开）
+    # dshPanelUrl: '<DSH_PANEL_URL>'

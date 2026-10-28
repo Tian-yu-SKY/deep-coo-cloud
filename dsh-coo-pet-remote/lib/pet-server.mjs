@@ -51,6 +51,12 @@ const PAGE_CSP = [
   "frame-ancestors 'self' http://127.0.0.1:* http://localhost:*",
 ].join('; ');
 
+/**
+ * `POST /api/dock` 允许的动作（兜底；impl 会通过 `opts.dockActions` 传真实白名单）。
+ * v0.4.3：换装页地板上的 6 个图标 → 真按钮后，页面只发这几种动作。
+ */
+export const DEFAULT_DOCK_ACTIONS = Object.freeze(['panel', 'figures', 'home', 'mail', 'music', 'chat']);
+
 export class PetServer {
   /**
    * @param {object} opts
@@ -61,6 +67,8 @@ export class PetServer {
    * @param {() => void} [opts.onConnect] 桌宠页面连上
    * @param {() => void} [opts.onDisconnect] 桌宠页面断开
    * @param {number} [opts.port] 希望绑的端口;0 = 让系统给一个
+   * @param {string[]} [opts.dockActions] `POST /api/dock` 允许的动作(默认 DEFAULT_DOCK_ACTIONS)
+   * @param {(action: string) => (object | Promise<object> | void)} [opts.onDock] 地板动作执行器(impl 注入)
    */
   constructor(opts) {
     this.opts = opts;
@@ -69,6 +77,9 @@ export class PetServer {
     this.petIsWindow = false;
     this.watchers = new Set();
     this.boundPort = 0;
+    this.dockActions = new Set(
+      Array.isArray(opts.dockActions) && opts.dockActions.length ? opts.dockActions : DEFAULT_DOCK_ACTIONS,
+    );
   }
 
   get port() {
@@ -249,6 +260,36 @@ export class PetServer {
         path === '/api/skin' ? { skin: parsed.skin } : { prefs: parsed },
       );
       return json(res, 200, { ok: true });
+    }
+    // 换装页地板图标(v0.4.3):只接受白名单动作,交给宿主执行(不在这里执行命令/开 URL)。
+    // 非 POST → 405(沿用页面其它路由的约定);action 不合法 → 400。
+    if (path === '/api/dock') {
+      if (req.method !== 'POST') {
+        res.writeHead(405, { allow: 'POST' }).end();
+        return;
+      }
+      let body = '';
+      try {
+        for await (const chunk of req) body += chunk;
+      } catch {
+        /* 读不下去当空体,下面会按非法 action 拒绝 */
+      }
+      let parsed = null;
+      try {
+        parsed = JSON.parse(body || '{}');
+      } catch {
+        parsed = null;
+      }
+      const action = typeof parsed?.action === 'string' ? parsed.action : '';
+      if (!this.dockActions.has(action)) {
+        return json(res, 400, { ok: false, action, error: 'unknown or missing action' });
+      }
+      try {
+        const result = await this.opts.onDock?.(action);
+        return json(res, 200, { ok: true, action, ...(result && typeof result === 'object' ? result : {}) });
+      } catch (err) {
+        return json(res, 500, { ok: false, action, error: String(err?.message ?? err) });
+      }
     }
     if (req.method === 'GET' && path === '/api/state') {
       return json(res, 200, this.opts.snapshot());

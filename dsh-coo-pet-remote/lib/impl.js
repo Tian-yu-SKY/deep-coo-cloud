@@ -260,6 +260,10 @@ export async function setup(ctx, config = {}) {
     settingsFromConfig, normalizeSettings, resolveSkin, decodePageSkin,
     uiPrefsOf, skinJsonOf, normalizeScaleRange,
   } = await import(`./pet-settings.mjs?v=${rev}`);
+  // v0.4.3:换装页地板图标 → 白名单动作(页面补丁 + /api/dock 执行器)
+  const {
+    DOCK_ACTIONS, DOCK_LABELS, DOCK_STYLE, executeDockAction,
+  } = await import(`./dock.mjs?v=${rev}`);
 
   const log = (...a) => ctx.logger?.info?.('[桌宠]', ...a);
   const dataDir = resolveDataDir(config, log);
@@ -281,7 +285,13 @@ export async function setup(ctx, config = {}) {
     return;
   }
   // ② 页面素材从它那儿取到本插件的数据目录(仓库里不放别人的代码与贴图,见 assets.mjs)
-  const assets = ensureAssets({ cooRoot, destDir: dataDir, log });
+  const assets = ensureAssets({
+    cooRoot,
+    destDir: dataDir,
+    log,
+    // v0.4.3:把地板图标的动作/标签/样式内联进换装页 stage.js 的副本
+    dock: { actions: DOCK_ACTIONS, labels: DOCK_LABELS, style: DOCK_STYLE },
+  });
   if (!assets.ok) {
     ctx.logger?.error?.(`[桌宠] ${assets.reason}`);
     return;
@@ -295,6 +305,12 @@ export async function setup(ctx, config = {}) {
   const userName = String(config.user ?? '主人');
   const autoStart = config.autoStart !== false;
   const petPort = Number(config.port) || 0;
+  /**
+   * v0.4.3:换装页地板「聊天气泡」按钮要打开的本机 DSH 面板地址。
+   * 默认空(分发版不内置本机地址);本机部署用配置覆盖 bundle 注入,例如
+   * `dshPanelUrl: 'http://127.0.0.1:<panel-port>'`。空时按钮只给提示,不打开任何东西。
+   */
+  const dshPanelUrl = String(config.dshPanelUrl ?? '').trim();
 
   /** 解析软链接后的真实路径;解析不了就原样返回。 */
   const realPath = (p) => {
@@ -651,9 +667,44 @@ export async function setup(ctx, config = {}) {
     persistSettings('换装页保存');
   };
 
+  /**
+   * 地板「音符」按钮：切换音效。与页面音效按钮走同一条设置链路
+   * （applySettings → 广播 `{t:'prefs',sound}` → persistSettings 落盘），两边状态始终一致。
+   * @returns {{ok: boolean, message: string, sound: boolean}}
+   */
+  const toggleSoundFromDock = () => {
+    const normalized = normalizeSettings(
+      { ...SETTINGS, sound: !SETTINGS.sound, skin: SETTINGS.skin },
+      { packs: PACKS, scaleRange, fallback: SETTINGS },
+    );
+    applySettings(normalized.settings, { reason: '地板图标:切换音效', resolved: normalized.skin });
+    persistSettings('地板图标音效');
+    return {
+      ok: true,
+      message: `音效已${normalized.settings.sound ? '开启' : '关闭'}`,
+      sound: normalized.settings.sound,
+    };
+  };
+
+  /**
+   * 换装页地板图标（v0.4.3）：只有 `DOCK_ACTIONS` 白名单，执行器见 `lib/dock.mjs`。
+   * 唯一可变地址是 Config 里的 `dshPanelUrl`（且必须 http(s)）；不执行任意命令/URL。
+   */
+  const dockDeps = {
+    cooExe: petExe,
+    webDir: WEB_DIR,
+    dshPanelUrl,
+    spawn,
+    openUrl: openWindow,
+    toggleSound: toggleSoundFromDock,
+    log: (line) => log(line),
+  };
+
   server = new PetServer({
     webDir: WEB_DIR,
     port: petPort,
+    dockActions: DOCK_ACTIONS,
+    onDock: async (action) => executeDockAction(action, dockDeps),
     snapshot: () => ({
       // v1.2:外观/大小/界面全部来自 DIY 设置;PREF 里就是 `{t:'prefs'}` 的那批界面字段
       ...PREF,

@@ -181,6 +181,100 @@ export function patchPetApp(src) {
   return { text: out, notes };
 }
 
+/** 换装页地板图标补丁要内联到页面里的默认动作/标签（impl 会传真实配置覆盖）。 */
+const DEFAULT_DOCK = {
+  actions: ['panel', 'figures', 'home', 'mail', 'music', 'chat'],
+  labels: ['Settings panel', 'Figure packs folder', 'Coopanion home page', 'Open mail', 'Toggle sound', 'Chat panel'],
+  style: [
+    '.floor-action{background:none;border:0;color:inherit;cursor:pointer;border-radius:6px;padding:3px;line-height:0}',
+    '.floor-action:hover{background:color-mix(in srgb,currentColor 12%,transparent)}',
+    '.floor-action:focus-visible{outline:2px solid currentColor;outline-offset:2px}',
+    '.floor-icons .floor-action svg{pointer-events:none;width:20px;height:20px}',
+  ].join('\n'),
+};
+
+/**
+ * 换装页地板图标的补丁（v0.4.3 / task-32）：把 `stage.js` 的 `dressFloor()` 里那 6 个
+ * **装饰** svg 换成真实按钮，点击 `POST /api/dock`（动作白名单与执行在 `lib/dock.mjs` + impl）。
+ *
+ * - 只改**复制到数据目录的副本**（`ensureAssets`），不动 Coopanion 安装目录；
+ * - 锚点找不到就原样返回并记 note，绝不硬改；已有补丁标记就跳过（幂等）；
+ * - `row` 的 `aria-hidden` 去掉，按钮可聚焦、有 `title`/`aria-label`；
+ * - 样式只作用于 `.floor-icons`，不影响整页其它 svg。
+ *
+ * @param {string} src `stage.js` 原文
+ * @param {{actions?: string[], labels?: string[], style?: string}} [dock]
+ * @returns {{ text: string, notes: string[] }}
+ */
+export function patchStageDock(src, dock) {
+  if (typeof src !== 'string' || !src) return { text: src, notes: ['地板图标:源码为空,跳过'] };
+  if (src.includes('dsh-floor-style') || src.includes('data-action="panel"')) {
+    return { text: src, notes: ['地板图标:已有'] };
+  }
+  const notes = [];
+  const config = {
+    actions: Array.isArray(dock?.actions) && dock.actions.length === 6 ? dock.actions : DEFAULT_DOCK.actions,
+    labels: Array.isArray(dock?.labels) && dock.labels.length === 6 ? dock.labels : DEFAULT_DOCK.labels,
+    style: typeof dock?.style === 'string' && dock.style ? dock.style : DEFAULT_DOCK.style,
+  };
+  const anchors = [
+    "row.innerHTML = DOCK.map(line).join('');",
+    'row.innerHTML = DOCK.map(line).join("");',
+  ];
+  const start = anchors.map((anchor) => src.indexOf(anchor)).find((index) => index >= 0) ?? -1;
+  if (start < 0) return { text: src, notes: ['地板图标:锚点没找到(dressFloor 可能改过),跳过'] };
+  const appendAnchor = 'floor.append(row);';
+  const appendIndex = src.indexOf(appendAnchor, start);
+  if (appendIndex < 0 || appendIndex - start > 400) {
+    return { text: src, notes: ['地板图标:锚点没找到(floor.append 不在附近),跳过'] };
+  }
+  const replacement = [
+    '/* dsh-coo-pet dock patch v1:装饰图标 → 真按钮(只 POST /api/dock) */',
+    '{',
+    `  const ACTIONS = ${JSON.stringify(config.actions)};`,
+    `  const LABELS = ${JSON.stringify(config.labels)};`,
+    `  const STYLE = ${JSON.stringify(config.style)};`,
+    "  if (!document.getElementById('dsh-floor-style')) {",
+    "    const style = document.createElement('style');",
+    "    style.id = 'dsh-floor-style';",
+    '    style.textContent = STYLE;',
+    '    document.head.append(style);',
+    '  }',
+    '  if (!row.dataset.dshDockBound) {',
+    "    row.dataset.dshDockBound = '1';",
+    "    row.addEventListener('click', (event) => {",
+    "      const button = event.target instanceof Element ? event.target.closest('.floor-action') : null;",
+    "      const action = button ? button.getAttribute('data-action') : '';",
+    '      if (!action) return;',
+    '      event.preventDefault();',
+    '      event.stopPropagation();',
+    "      fetch('/api/dock', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action }) })",
+    "        .catch((err) => console.warn('[dsh-coo-pet] floor action failed', action, err));",
+    '    });',
+    '  }',
+    '  row.innerHTML = DOCK.map((shape, index) => {',
+    '    const action = ACTIONS[index] || \'\';',
+    '    const label = LABELS[index] || action;',
+    "    return '<button type=\"button\" class=\"floor-action\" data-action=\"' + action + '\" title=\"' + label + '\" aria-label=\"' + label + '\">' + line(shape) + '</button>';",
+    "  }).join('');",
+    '  floor.append(row);',
+    '}',
+  ].join('\n');
+  let out = `${src.slice(0, start)}${replacement}${src.slice(appendIndex + appendAnchor.length)}`;
+  // aria-hidden 如果留着,里面的按钮在无障碍树里仍不可见 → 去掉(只针对 row 那一行)
+  const ariaPatterns = [
+    "  row.setAttribute('aria-hidden', 'true');\n",
+    "row.setAttribute('aria-hidden', 'true');\n",
+    "  row.setAttribute('aria-hidden', 'true');",
+    "row.setAttribute('aria-hidden', 'true');",
+  ];
+  const aria = ariaPatterns.find((pattern) => out.includes(pattern));
+  if (aria) out = out.replace(aria, '');
+  else notes.push('地板图标:aria-hidden 锚点没找到(按钮可能被无障碍树忽略)');
+  notes.push('地板图标:已换成按钮');
+  return { text: out, notes };
+}
+
 /**
  * 源目录的「指纹」:整个 `web/` 的文件数 + 总字节 + 最新修改时间。
  *
@@ -231,10 +325,10 @@ function sourceStamp(src) {
  *
  * 补丁每次都对一遍,拷完立刻打,所以重拷不会把它弄丢。
  *
- * @param {{ cooRoot: string, destDir: string, log?: (line: string) => void }} opts
+ * @param {{ cooRoot: string, destDir: string, log?: (line: string) => void, dock?: {actions?: string[], labels?: string[], style?: string} }} opts
  * @returns {{ ok: true, webDir: string, notes: string[] } | { ok: false, reason: string }}
  */
-export function ensureAssets({ cooRoot, destDir, log }) {
+export function ensureAssets({ cooRoot, destDir, log, dock }) {
   const src = join(cooRoot, PET_PKG, 'web');
   const dest = join(destDir, 'web');
   const petHtml = join(dest, 'pet.html');
@@ -279,6 +373,16 @@ export function ensureAssets({ cooRoot, destDir, log }) {
     if (patched.text !== before) writeFileSync(appFile, patched.text);
   } catch (err) {
     notes = [`补丁没打上:${err.message}`];
+  }
+  // v0.4.3:换装页地板图标(装饰 → 真按钮,只调用本机 /api/dock)
+  try {
+    const stageFile = join(dest, 'stage.js');
+    const before = readFileSync(stageFile, 'utf8');
+    const patched = patchStageDock(before, dock);
+    notes.push(...patched.notes.map((note) => `stage.js ${note}`));
+    if (patched.text !== before) writeFileSync(stageFile, patched.text);
+  } catch (err) {
+    notes.push(`stage.js 补丁没打上:${err.message}`);
   }
   return { ok: true, webDir: dest, notes };
 }

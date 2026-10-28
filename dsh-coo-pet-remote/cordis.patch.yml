@@ -88,3 +88,4 @@
         # bridgeTokenFile: '<path to bridge token file>'   # 绝对 / 相对 dataDir / ~
         # packsExtraDirs: ['<extra figure pack root>']
         # settingsFile: '<path to pet-settings.json>'
+        # dshPanelUrl: '<your DSH panel URL>'
