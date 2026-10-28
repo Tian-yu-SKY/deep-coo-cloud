@@ -13,7 +13,7 @@ T24 加「Coo 市场」Tab：浏览 npm 上的 Coo/Coopanion 扩展（Cortico �
 - Host 半：`index.js` —— 在 DSH Web 服务器注册同源路由 `/whale-panel/*`（聊天/设置/服务器 QQ 配置）与 `/control-center/*`（状态聚合/PAUSED，Tab 内复用），代理 bridge HTTP、转发 bridge token、按需 ssh 读写服务器 awareness patch。
 - Client 半：`client.js` —— 注册**一个** `sidebar.panellist`（id=`whale-chat`、label=「鲸歌」、order=5）与一个 `main` keyed 整页 Tab 外壳。
 - 无构建步骤（纯 ESM/CJS 工厂 bundle）；样式只用 DSH 主题 token（`--dsw-alias-*`），跟随明暗主题。
-- 版本：`1.6.0`（T26 可分发/通用化）；离线测试 **106 项**（host / client / manifest / control-center / settings / pet-diy / coo-market / coo-market-download 八组）。
+- 版本：`2.1.0`（T30 形象包 ZIP 导入；包名 `deep-coo-cloud`）；离线测试 **120 项**（host / client / manifest / control-center / settings / pet-diy / pet-diy-import / coo-market / coo-market-download 九组）。
 - **可分发**：默认配置不含任何本机/服务器私有信息（IP/域名/QQ 号/路径/SSH key/token）；侧栏名称、面板标题、Tab 文案、桥接地址、服务器 SSH、QQ 白名单均可在「设置 → 通用/连接」里配置（保存到 `whale-panel/settings.json`）。
 - 「设置 → 桌宠 DIY」依赖 coo-fork 桌宠插件 **`dsh-coo-pet-remote@0.4.0-remote.1`**（T22）：写 `coo-pet-data/pet-settings.json` 后插件 ~1s 热应用；该插件 config 未覆盖 settingsFile，默认路径与本插件默认一致。
 
@@ -62,9 +62,17 @@ Tab 状态记忆在 `localStorage`（key `whale-panel.tab`）；切走 Tab 会�
 | 桌宠 DIY | 大小/气泡/光晕 | 大小 0.5–3（step 0.05）；气泡大小/字号/气泡速度 0.5–2；光晕 0–14 |
 | 桌宠 DIY | 主题/走位/音效/按钮 | 主题 亮/暗；走位 free/calm/off；音效 / 双击聊天 / 锁定帧率开关；悬停按钮勾选（chat/voice/roam/theme/sound/hide/dress/cooChat） |
 | 桌宠 DIY | 保存并应用 | POST 写 `coo-pet-data/pet-settings.json`（合并其它字段、原子写、备份 `.bak`），toast「已应用（桌宠 1s 内变化）」；「刷新形象包列表」重新扫描 |
+| 桌宠 DIY | **导入形象包（ZIP）**（T30） | 选 zip 上传到 Host → 安全解包（拒绝绝对路径/`..`/盘符/超 5000 条）→ 找 `figure.json`（深度≤3）→ 校验 id `^[a-z0-9][a-z0-9-]{0,31}$` → 安装到 `coo-pet-data/figures/<id>` 与 `web/<id>`；同名 409 → 二次确认 `replace=1`（旧包备份到 `figures/.backup-*`）；成功后刷新列表并选中新包，**不自动保存 pet-settings** |
 | 路径 | dshLinkRoot / 本地设置文件 | 显示路径 + 「打开 dsh-link 目录」按钮（Host 侧 explorer，固定路径） |
 
 **只改自己的字段**：服务器 `cordis.patch.yml` 由 T17/T20 共用（awareness bundle），应用时只替换这 5 个 `qqPreview*` 键，**保留注释与其它所有键（如 T20 的 `dialogueEnabled` 等）**——有单测覆盖（见 §4）。
+
+**导入形象包（T30）**：`POST /whale-panel/pet-diy/import-pack` 接收原始 ZIP 字节（`application/zip`，≤128MB/120s），
+写临时文件 → 系统 `tar -tf` 校验条目 → `tar -xf` 解包到临时目录 → 深度≤3 找 `figure.json`（多个 → 400）→
+校验 id → 复制到 `coo-pet-data/figures/<id>` 与 `web/<id>`（只复制普通文件/目录，**拒绝符号链接**）；
+同名已存在且未带 `?replace=1` → **409**；替换会先把旧目录备份到 `figures/.backup-<id>-<ts>/`；失败清理临时目录。
+**只落文件、绝不执行 zip 内任何代码**；成功后刷新 `GET /whale-panel/pet-diy` 即可在「形象包」下拉里选中。
+本机样例：`<workspace>/sample-coo-pack.zip`（可用来验证导入流程）。
 
 ### 1.3 Coo 市场（T24）
 
@@ -140,6 +148,7 @@ bridge 的 HTTP 接口（`/health` `/history` `/say` …）**没有 CORS 头**�
   POST /whale-panel/open-directory   ──────▶  explorer 打开 dshLinkRoot（固定路径）
   GET  /whale-panel/pet-diy          ──────▶  读 pet-settings.json + 扫描 web/*/figure.json + skin.json   ──▶ coo-pet-data（只读）
   POST /whale-panel/pet-diy          ──────▶  白名单校验 + 合并写 pet-settings.json（原子写 + .bak 备份；插件 ~1s 热应用）
+  POST /whale-panel/pet-diy/import-pack ────▶  原始 ZIP（≤128MB）→ 安全校验/解包 → coo-pet-data/figures|web/<id>（不执行）
   GET  /whale-panel/coo-market       ──────▶  npm search(cortico) 缓存 10min + 扫 Coopanion extensions（只读） ──▶ registry.npmjs.org / 本机
   POST /whale-panel/coo-market/download  ────▶  下载 npm tarball（≤200MB/120s）→ 校验 tar 条目 → 解包到 dsh-link/coo-extensions/（不执行）
   POST /whale-panel/coo-market/install   ────▶  二次确认后用 Coopanion 自带 pnpm 安装到 extensions（需重启 Coopanion）
@@ -233,6 +242,7 @@ plugin_manager { action: "set_bundle", target: "@local/dsh-whale-panel", enabled
 | `awarenessCacheMs` | `15000` | 设置页读取服务器配置的缓存（避免每次打开都 ssh） |
 | `cooPetDataRoot` | 空（= `dshLinkRoot/coo-pet-data`） | 桌宠数据根（T23）；T22 插件默认 settingsFile 即 `coo-pet-data/pet-settings.json`（未覆盖 config），与本插件默认一致 |
 | `petSettingsFile` / `petSkinFile` / `petPacksDir` | 空（= 上面根下 `pet-settings.json` / `skin.json` / `web`） | 桌宠 DIY 设置/当前 skin/形象包目录；`web` 由 T22 复制用户包 |
+| `petImportMaxBytes` / `petImportTimeoutMs` | `134217728`（128MB） / `120000` | 形象包 ZIP 上传上限 / 解包超时（T30） |
 | `cooMarketUrl` | npm search（text=cortico,size=250） | Coo 市场数据源（需本机能访问 registry.npmjs.org） |
 | `cooMarketCacheMs` / `cooMarketTimeoutMs` | `600000` / `15000` | 市场缓存 10min / 拉取超时 |
 | `cooExtensionsDir` | 空（= 自动探测 Coopanion 的 `data/extensions`；探测不到回退 `<dshLinkRoot>/coo-extensions-installed`） | 本机 Coopanion 已安装扩展目录（只读扫描；安装按钮会写这里，需确认） |
@@ -349,6 +359,18 @@ errors: 无
 - T26 新增测试：默认通用值、UI/桥接/SSH/QQ 白名单校验与保存、显式空 SSH → `GET settings` 返回 disabled 且 `apply-awareness` 400 `ssh-disabled`、`GET /config` 下发 ui/sshEnabled/qqDefaults/paths、client `localizeWithUi`/Tab 文案覆盖/设置页「通用 / 连接」渲染。
 - 未实测真实「局域网 bridge」与真实 SSH 应用（默认禁用；需要的用户填 `serverSshHost` 后用）。全部测试离线 mock。
 
+### T30 联调记录（2026-10-29，未安装、未重启本机 DSH）
+
+- 离线测试 **120/120 PASS**，新增 `pet-diy-import.test.mjs` 12 项：条目校验（绝对路径/`..`/盘符/空/超 5000）、
+  figure.json 深度/多个、符号链接拒绝、正常导入（figures+web，GET 列表可见）、嵌套一层只装包内容、
+  无 figure/多 figure/id 非法/name 缺失 400、危险条目/坏 zip/超上限 413/415/403/405、已存在 409、
+  `replace=1` 备份旧包并替换、临时目录清理；client 新增 2 项（导入 URL/结果文案/上限、设置页导入按钮 + file input）。
+- **真机式冒烟（真实 zip + 真实系统 tar，临时 coo-pet-data）**：PowerShell `Compress-Archive` 生成 535B zip →
+  `POST /whale-panel/pet-diy/import-pack` → 200（`demo-pack` v0.9.0，3 files）；再次导入 → 409 `already-exists`；
+  `GET /pet-diy` 列表出现该包；实例文件为 `web/demo-pack/{figure.json,index.js,thumbs/thumb.png}`，临时目录已清理。
+  样例 zip 已放 `<workspace>/sample-coo-pack.zip` 供 Lead 真机验证。
+- 未在真实用户桌宠上导入（Lead reload 后用自己的 zip 验证）；只写我们自己的 `coo-pet-data`，不写 Coopanion 安装目录、不执行包内代码。
+
 ### T25 联调记录（2026-10-28，未安装、未重启本机 DSH）
 
 - 离线测试 **101/101 PASS**，新增 `coo-market-download.test.mjs` 10 项（包名校验/安全目录名/tar 条目安全/已下载扫描/
@@ -449,6 +471,9 @@ errors: 无
 32. **默认不启用 SSH**（`serverSshHost=''`）：QQ 预览服务器配置读写/「应用并重启服务器 DSH」默认禁用，需要用户在「设置 → 通用/连接」填 `user@host`（以及 config `awarenessPatchPath`）后才可用。
 33. **名称/标题/Tab 文案保存后需刷新页面生效**（Client 模块在插件加载时读取一次 `/config` 并重注册侧栏 label）；`ui.*` 也可直接写在 config 里作为分发默认值。
 34. **bridge 地址的 config 层仍要求回环**（安全红线）；设置页可覆盖为局域网地址（仅 http/https + 回环/局域网校验）。
+35. **形象包导入只支持 zip**（≤128MB，一个 zip 只能含一个 `figure.json`，id 需匹配 `^[a-z0-9][a-z0-9-]{0,31}$`）；只复制普通文件/目录（拒绝符号链接/特殊文件），不执行包内代码。
+36. **导入目标只写本机 `coo-pet-data/figures` 与 `web`**：不写 Coopanion 安装目录；`replace=1` 会先备份旧目录到 `figures/.backup-<id>-<ts>`（不会自动清理，可手动删）。
+37. **导入后需「刷新形象包列表」或重新打开设置页**才能在「形象包」下拉选中（本实现导入成功会自动刷新并选中，但不会自动保存 pet-settings/应用到桌面，需再点「保存并应用」）。
 
 ## 6. 文件
 

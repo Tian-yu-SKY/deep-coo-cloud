@@ -1,8 +1,8 @@
 {
   "name": "deep-coo-cloud",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "private": true,
-  "description": "deep-coo-cloud：Coo 桌宠 × 云端 DSH 人格控制台。本机 DSH Web UI 合并版面板（聊天/总控台/设置/Coo 市场/桌宠 DIY），可配置侧栏名称/标题、桥接地址、服务器 SSH、QQ 白名单；不含任何本机私有信息。",
+  "description": "deep-coo-cloud：Coo 桌宠 × 云端 DSH 人格控制台（本机 DSH Web UI 合并版面板：聊天/总控台/设置/Coo 市场/桌宠 DIY）。支持导入 Coo 形象包 ZIP（安全解包到本机 coo-pet-data，不执行包内代码）；可配置名称/标题/桥接/SSH/QQ 白名单。",
   "type": "module",
   "main": "index.js",
   "exports": {

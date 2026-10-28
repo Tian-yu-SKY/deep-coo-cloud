@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "deep-coo-cloud",
-    "description": "deep-coo-cloud: a Coo desktop-pet × cloud DSH persona console. Chat / Control Center / Settings / Coo Market / Pet DIY; configurable label, title, bridge URL, server SSH and QQ allowlists."
+    "description": "deep-coo-cloud console: Chat / Control Center / Settings / Coo Market / Pet DIY; imports Coo figure-pack ZIPs safely (extract only, never executes pack code)."
   }
 }

@@ -19,8 +19,11 @@
 
 import { execFile, execFileSync, spawn } from 'node:child_process';
 import {
+  copyFileSync,
   existsSync,
+  lstatSync,
   mkdirSync,
+  mkdtempSync,
   readFileSync,
   readdirSync,
   renameSync,
@@ -157,6 +160,9 @@ export const DEFAULTS = Object.freeze({
   petSettingsFile: '',
   petSkinFile: '',
   petPacksDir: '',
+  /** 桌宠形象包 ZIP 导入（T30）：上传上限 128MB / 解包超时 120s。 */
+  petImportMaxBytes: 128 * 1024 * 1024,
+  petImportTimeoutMs: 120_000,
   /** Coo 市场（T24）：npm registry 搜索 URL / 缓存 10min / 超时 / 本机 Coopanion 扩展目录（空=自动探测）。 */
   cooMarketUrl: 'https://registry.npmjs.org/-/v1/search?text=cortico&size=250',
   cooMarketCacheMs: 600_000,
@@ -410,6 +416,8 @@ export function resolveConfig(config = {}) {
       petSettingsFile: resolveUnder(merged.petSettingsFile, 'pet-settings.json'),
       petSkinFile: resolveUnder(merged.petSkinFile, 'skin.json'),
       petPacksDir: resolveUnder(merged.petPacksDir, 'web'),
+      petImportMaxBytes: positive(merged.petImportMaxBytes, DEFAULTS.petImportMaxBytes),
+      petImportTimeoutMs: positive(merged.petImportTimeoutMs, DEFAULTS.petImportTimeoutMs),
       cooMarketUrl: trimmed(merged.cooMarketUrl) !== '' ? trimmed(merged.cooMarketUrl) : DEFAULTS.cooMarketUrl,
       cooMarketCacheMs: positive(merged.cooMarketCacheMs, DEFAULTS.cooMarketCacheMs),
       cooMarketTimeoutMs: positive(merged.cooMarketTimeoutMs, DEFAULTS.cooMarketTimeoutMs),
@@ -573,6 +581,11 @@ export function createRouteHandler(settings, deps = {}) {
         if (method === 'GET') return await handlePetDiyGet(res, effective);
         if (method === 'POST') return await handlePetDiyPost(req, res, effective);
         return methodNotAllowed(res, 'GET, POST');
+      }
+      // ── T30：桌宠形象包 ZIP 导入（原始二进制；只落文件，不执行包内代码）──
+      if (path === `${ROUTE_PREFIX}/pet-diy/import-pack`) {
+        if (method !== 'POST') return methodNotAllowed(res, 'POST');
+        return await handlePetDiyImportPack(req, res, effective, deps, url.searchParams.get('replace') === '1');
       }
       // ── T24：Coo 市场（浏览）──
       if (path === `${ROUTE_PREFIX}/coo-market`) {
@@ -1467,6 +1480,298 @@ async function handlePetDiyPost(req, res, settings) {
       error: { code: 'pet-diy-write-failed', message: error instanceof Error ? error.message : String(error) },
     });
   }
+}
+
+// ───────────────────────────── 桌宠形象包 ZIP 导入（T30） ─────────────────────────────
+// 用户把 Coo 形象包 zip 上传到本机 → 校验 zip 条目/路径穿越 → 解包临时目录 → 找 figure.json
+// → 校验 id → 安装到 coo-pet-data/figures/<id> 与 web/<id>（已存在 409；replace=1 先备份）。
+// 只复制普通文件，拒绝符号链接；**绝不执行**包内代码。
+
+/** zip 条目上限 / figure.json 的 id 规则。 */
+export const PET_IMPORT_MAX_ENTRIES = 5000;
+export const PET_FIGURE_ID_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
+
+/** 读取原始二进制请求体（兼容 application/zip；超过 maxBytes → payload-too-large）。 */
+export function readRawBody(req, maxBytes, timeoutMs = 120_000) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+    let settled = false;
+    const finish = (error, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (error) reject(error);
+      else resolve(value);
+    };
+    const timer = setTimeout(() => {
+      finish(Object.assign(new Error('上传超时'), { code: 'timeout' }));
+      try { req.destroy?.(); } catch { /* ignore */ }
+    }, Math.max(1_000, timeoutMs));
+    req.on('data', (chunk) => {
+      if (settled) return;
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      size += buffer.length;
+      if (size > maxBytes) {
+        finish(Object.assign(new Error(`上传文件超过上限 ${Math.round(maxBytes / 1024 / 1024)}MB`), { code: 'payload-too-large' }));
+        try { req.destroy?.(); } catch { /* ignore */ }
+        return;
+      }
+      chunks.push(buffer);
+    });
+    req.on('end', () => finish(null, Buffer.concat(chunks)));
+    req.on('error', (error) => finish(Object.assign(new Error('读取上传内容失败'), { code: 'bad-request', cause: error })));
+  });
+}
+
+/** 校验 zip 条目：拒绝绝对路径/盘符/.. /空条目/超长/超数量。 */
+export function validateImportZipEntries(entries, maxEntries = PET_IMPORT_MAX_ENTRIES) {
+  const list = Array.isArray(entries) ? entries : [];
+  if (list.length === 0) return { ok: false, error: 'zip 里没有文件' };
+  if (list.length > maxEntries) return { ok: false, error: `zip 条目过多（${list.length} > ${maxEntries}）` };
+  const normalized = [];
+  for (const raw of list) {
+    const text = String(raw ?? '').trim();
+    if (text === '') return { ok: false, error: 'zip 含空条目' };
+    if (text.length > 1024) return { ok: false, error: `zip 条目路径太长：${text.slice(0, 80)}…` };
+    const slash = text.replace(/\\/g, '/');
+    if (slash.startsWith('/')) return { ok: false, error: `zip 含绝对路径条目：${text}` };
+    if (/^[a-zA-Z]:/.test(slash)) return { ok: false, error: `zip 含盘符条目：${text}` };
+    const parts = slash.split('/').filter((part) => part !== '');
+    if (parts.length === 0) return { ok: false, error: 'zip 含空条目' };
+    if (parts.includes('..')) return { ok: false, error: `zip 含路径穿越条目：${text}` };
+    normalized.push(slash);
+  }
+  return { ok: true, entries: normalized };
+}
+
+/** 在解包目录里找 figure.json（深度 ≤ maxDepth，返回按深度/路径排序的列表）。 */
+export function findFigureJson(root, maxDepth = 3) {
+  const matches = [];
+  const walk = (dir, depth) => {
+    if (depth > maxDepth) return;
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name);
+      if (entry.isSymbolicLink()) continue;
+      if (entry.isDirectory()) { walk(full, depth + 1); continue; }
+      if (entry.isFile() && entry.name === 'figure.json') {
+        matches.push({ file: full, dir, depth, relative: path.relative(root, full) });
+      }
+    }
+  };
+  walk(root, 0);
+  matches.sort((left, right) => left.depth - right.depth || left.relative.localeCompare(right.relative));
+  return matches;
+}
+
+/** 递归复制形象包目录（只允许普通文件/目录；拒绝符号链接/特殊文件）。 */
+export function copyPackDirectory(sourceDir, targetDir) {
+  let files = 0;
+  const walk = (source, target) => {
+    const stats = lstatSync(source);
+    if (stats.isSymbolicLink()) throw Object.assign(new Error('形象包含符号链接，拒绝导入'), { code: 'unsafe-pack' });
+    if (stats.isDirectory()) {
+      mkdirSync(target, { recursive: true });
+      for (const entry of readdirSync(source, { withFileTypes: true })) {
+        walk(path.join(source, entry.name), path.join(target, entry.name));
+      }
+      return;
+    }
+    if (!stats.isFile()) throw Object.assign(new Error('形象包含非普通文件，拒绝导入'), { code: 'unsafe-pack' });
+    mkdirSync(path.dirname(target), { recursive: true });
+    copyFileSync(source, target);
+    files += 1;
+  };
+  walk(sourceDir, targetDir);
+  return files;
+}
+
+/** 系统 tar 列 zip 条目（Windows 自动用 System32 tar）。 */
+function defaultZipList(settings, zipPath, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    execFile(resolveTarBinary(settings), ['-tf', zipPath], {
+      windowsHide: true,
+      timeout: Math.max(5_000, timeoutMs),
+      maxBuffer: 32 * 1024 * 1024,
+    }, (error, stdout, stderr) => {
+      if (error) reject(new Error(`tar 列出 zip 条目失败：${(stderr || '').trim() || error.message}`));
+      else resolve(String(stdout).split(/\r?\n/).filter((line) => line.trim() !== ''));
+    });
+  });
+}
+
+/** 系统 tar 解包 zip（-xf 自动识别格式）。 */
+function defaultZipExtract(settings, zipPath, destDir, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    execFile(resolveTarBinary(settings), ['-xf', zipPath, '-C', destDir], {
+      windowsHide: true,
+      timeout: Math.max(5_000, timeoutMs),
+      maxBuffer: 16 * 1024 * 1024,
+    }, (error, stdout, stderr) => {
+      if (error) reject(new Error(`tar 解包 zip 失败：${(stderr || '').trim() || error.message}`));
+      else resolve();
+    });
+  });
+}
+
+/** 解包 + 校验 + 安装形象包（不执行任何内容）。 */
+export async function installImportedPack(settings, zipBuffer, options = {}, deps = {}) {
+  const replace = options.replace === true;
+  const dataRoot = settings.cooPetDataRoot;
+  const figuresDir = path.join(dataRoot, 'figures');
+  const webDir = path.join(dataRoot, 'web');
+  const timeoutMs = Math.max(5_000, Number(settings.petImportTimeoutMs) || 120_000);
+  let tempRoot = null;
+  try {
+    mkdirSync(dataRoot, { recursive: true });
+    tempRoot = mkdtempSync(path.join(dataRoot, '.tmp-import-'));
+    const zipPath = path.join(tempRoot, 'upload.zip');
+    writeFileSync(zipPath, zipBuffer);
+
+    let rawEntries;
+    try {
+      rawEntries = deps.zipList
+        ? await deps.zipList(settings, zipPath, { timeoutMs })
+        : await defaultZipList(settings, zipPath, timeoutMs);
+    } catch (error) {
+      return { ok: false, status: 400, code: 'bad-zip', error: `不是有效的 ZIP：${error instanceof Error ? error.message : String(error)}` };
+    }
+    const entriesCheck = validateImportZipEntries(rawEntries);
+    if (!entriesCheck.ok) return { ok: false, status: 400, code: 'unsafe-zip', error: entriesCheck.error };
+
+    const extractDir = path.join(tempRoot, 'extract');
+    mkdirSync(extractDir, { recursive: true });
+    try {
+      if (deps.zipExtract) await deps.zipExtract(settings, zipPath, extractDir, { timeoutMs });
+      else await defaultZipExtract(settings, zipPath, extractDir, timeoutMs);
+    } catch (error) {
+      return { ok: false, status: 400, code: 'bad-zip', error: `解包 ZIP 失败：${error instanceof Error ? error.message : String(error)}` };
+    }
+
+    const matches = findFigureJson(extractDir, 3);
+    if (matches.length === 0) {
+      return { ok: false, status: 400, code: 'no-figure', error: 'zip 里没找到 figure.json（需位于深度 3 以内的目录）' };
+    }
+    if (matches.length > 1) {
+      return { ok: false, status: 400, code: 'multiple-figures', error: `找到多个 figure.json（${matches.length} 个），请一个 zip 只放一个形象包` };
+    }
+    const figureFile = matches[0].file;
+    const figure = readJsonSafe(figureFile);
+    if (!figure || typeof figure !== 'object') {
+      return { ok: false, status: 400, code: 'bad-figure', error: 'figure.json 不是合法 JSON 对象' };
+    }
+    const id = typeof figure.id === 'string' ? figure.id.trim() : '';
+    if (!PET_FIGURE_ID_RE.test(id)) {
+      return { ok: false, status: 400, code: 'bad-id', error: `figure.json 的 id 不合法（需 ^[a-z0-9][a-z0-9-]{0,31}$）：${id || '(空)'}` };
+    }
+    const name = localizedName(figure.name, '');
+    if (name === '') return { ok: false, status: 400, code: 'bad-name', error: 'figure.json 缺少可读的 name' };
+    const version = typeof figure.version === 'string' ? figure.version : '';
+    const packRoot = path.dirname(figureFile);
+    const figuresTarget = path.join(figuresDir, id);
+    const webTarget = path.join(webDir, id);
+    const exists = existsSync(figuresTarget) || existsSync(webTarget);
+    if (exists && !replace) {
+      return {
+        ok: false,
+        status: 409,
+        code: 'already-exists',
+        id,
+        exists: true,
+        error: `形象包 ${id} 已存在；如要替换请带 ?replace=1 再次上传`,
+      };
+    }
+
+    let backupDir = null;
+    if (exists) {
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      backupDir = path.join(figuresDir, `.backup-${id}-${stamp}`);
+      mkdirSync(backupDir, { recursive: true });
+      if (existsSync(figuresTarget)) renameSync(figuresTarget, path.join(backupDir, 'figures'));
+      if (existsSync(webTarget)) renameSync(webTarget, path.join(backupDir, 'web'));
+    }
+
+    const stage = path.join(tempRoot, 'stage');
+    let files = 0;
+    try {
+      files = copyPackDirectory(packRoot, stage);
+      mkdirSync(figuresDir, { recursive: true });
+      mkdirSync(webDir, { recursive: true });
+      copyPackDirectory(stage, figuresTarget);
+      copyPackDirectory(stage, webTarget);
+    } catch (error) {
+      for (const target of [figuresTarget, webTarget]) {
+        try { rmSync(target, { recursive: true, force: true }); } catch { /* ignore */ }
+      }
+      if (backupDir !== null) {
+        try { if (existsSync(path.join(backupDir, 'figures'))) renameSync(path.join(backupDir, 'figures'), figuresTarget); } catch { /* ignore */ }
+        try { if (existsSync(path.join(backupDir, 'web'))) renameSync(path.join(backupDir, 'web'), webTarget); } catch { /* ignore */ }
+        try { rmSync(backupDir, { recursive: true, force: true }); } catch { /* ignore */ }
+      }
+      throw error;
+    }
+
+    return {
+      ok: true,
+      id,
+      name,
+      version,
+      replaced: exists,
+      dirs: [figuresTarget, webTarget],
+      files,
+      backupDir,
+    };
+  } catch (error) {
+    const code = error && error.code === 'unsafe-pack' ? 'unsafe-pack' : 'import-failed';
+    return { ok: false, status: code === 'unsafe-pack' ? 400 : 500, code, error: error instanceof Error ? error.message : String(error) };
+  } finally {
+    if (tempRoot !== null) {
+      try { rmSync(tempRoot, { recursive: true, force: true }); } catch { /* ignore */ }
+    }
+  }
+}
+
+/** POST /whale-panel/pet-diy/import-pack：原始 zip 上传（同源校验在 handleRoute 统一做）。 */
+async function handlePetDiyImportPack(req, res, settings, deps, replace) {
+  const contentType = String((req.headers && req.headers['content-type']) || '').toLowerCase();
+  if (contentType !== '' && !/^application\/(zip|x-zip-compressed|octet-stream)\b/.test(contentType)) {
+    return sendJson(res, 415, { ok: false, error: { code: 'unsupported-media-type', message: '请上传 ZIP 文件（Content-Type: application/zip）' } });
+  }
+  const limit = Math.max(1, Number(settings.petImportMaxBytes) || 128 * 1024 * 1024);
+  let body;
+  try {
+    body = await readRawBody(req, limit, Math.max(5_000, Number(settings.petImportTimeoutMs) || 120_000));
+  } catch (error) {
+    const code = error && error.code ? error.code : 'bad-request';
+    const status = code === 'payload-too-large' ? 413 : (code === 'timeout' ? 408 : 400);
+    return sendJson(res, status, { ok: false, error: { code, message: error instanceof Error ? error.message : String(error) } });
+  }
+  const result = await installImportedPack(settings, body, { replace }, deps);
+  if (!result.ok) {
+    return sendJson(res, result.status || 400, {
+      ok: false,
+      error: { code: result.code || 'import-failed', message: result.error },
+      ...(typeof result.id === 'string' ? { id: result.id } : {}),
+      ...(result.exists === true ? { exists: true } : {}),
+    });
+  }
+  return sendJson(res, 200, {
+    ok: true,
+    id: result.id,
+    name: result.name,
+    version: result.version,
+    replaced: result.replaced === true,
+    dirs: result.dirs,
+    files: result.files,
+    backupDir: result.backupDir,
+    note: '已导入形象包（未执行包内任何代码）；可在「形象包」下拉中选择，保存并应用后桌宠 ~1s 内变化。',
+  });
 }
 
 // ───────────────────────────── Coo 市场浏览（T24） ─────────────────────────────

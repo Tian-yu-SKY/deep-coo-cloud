@@ -251,6 +251,15 @@ window.__ModuleLoader__.load({
       'set.pet.saving': '应用中…',
       'set.pet.saved': '已应用（桌宠 1s 内变化）',
       'set.pet.refreshPacks': '刷新形象包列表',
+      'set.pet.import': '导入形象包（ZIP）',
+      'set.pet.importing': '上传中…',
+      'set.pet.importHint': '支持 Coo 形象包 ZIP（内含 figure.json，≤128MB）。只解包文件到本机 coo-pet-data，不执行包内代码。',
+      'set.pet.imported': '已导入 {id}{version}',
+      'set.pet.importFailed': '导入失败',
+      'set.pet.importTooLarge': '文件超过 128MB，无法导入',
+      'set.pet.importConflict': '形象包 {id} 已存在，替换？旧包会备份到 figures/.backup-*。',
+      'set.pet.importReplace': '替换',
+      'set.pet.importCancel': '取消',
       'set.pet.packsError': '形象包读取失败',
       'set.pet.requiresT22': '需要 coo-fork 桌宠插件 0.4.0+ 才会热应用；保存后约 1s 生效，无需重启。',
       'set.pet.currentFallback': '当前生效读取失败',
@@ -495,6 +504,15 @@ window.__ModuleLoader__.load({
       'set.pet.saving': 'Applying…',
       'set.pet.saved': 'Applied (pet updates within ~1s)',
       'set.pet.refreshPacks': 'Refresh figure packs',
+      'set.pet.import': 'Import figure pack (ZIP)',
+      'set.pet.importing': 'Uploading…',
+      'set.pet.importHint': 'Accepts a Coo figure-pack ZIP (figure.json inside, ≤128MB). Only extracts files into local coo-pet-data; never executes pack code.',
+      'set.pet.imported': 'Imported {id}{version}',
+      'set.pet.importFailed': 'Import failed',
+      'set.pet.importTooLarge': 'File exceeds 128MB and cannot be imported',
+      'set.pet.importConflict': 'Figure pack {id} already exists. Replace it? The old pack will be backed up under figures/.backup-*.',
+      'set.pet.importReplace': 'Replace',
+      'set.pet.importCancel': 'Cancel',
       'set.pet.packsError': 'Failed to read figure packs',
       'set.pet.requiresT22': 'Requires coo-fork pet plugin 0.4.0+ to hot-apply; changes take effect within ~1s, no restart needed.',
       'set.pet.currentFallback': 'Failed to read current pet settings',
@@ -1412,6 +1430,34 @@ window.__ModuleLoader__.load({
       return Array.isArray(list) ? list.join(', ') : '';
     }
 
+    /** T30：形象包 ZIP 上传上限（与 Host config 默认一致）。 */
+    const PET_IMPORT_MAX_BYTES = 128 * 1024 * 1024;
+
+    /** T30：形象包导入 URL（replace=true 时带 ?replace=1）。 */
+    function buildImportPackUrl(replace) {
+      return `${api('pet-diy/import-pack')}${replace === true ? '?replace=1' : ''}`;
+    }
+
+    /** T30：把 Host 导入结果整理成 toast 文案。 */
+    function summarizeImportPackResult(data) {
+      const id = data && typeof data.id === 'string' ? data.id : '';
+      const version = data && typeof data.version === 'string' && data.version !== '' ? ` v${data.version}` : '';
+      return id === '' ? '' : `已导入 ${id}${version}`;
+    }
+
+    /** T30：上传原始 ZIP 字节（不走 fetchJson，避免被 JSON 化）。 */
+    async function uploadPetPack(file, replace) {
+      const buffer = typeof file.arrayBuffer === 'function' ? await file.arrayBuffer() : null;
+      const response = await fetch(buildImportPackUrl(replace), {
+        method: 'POST',
+        headers: { 'content-type': (file && file.type) || 'application/zip' },
+        body: buffer,
+      });
+      let data = null;
+      try { data = await response.json(); } catch { data = null; }
+      return { status: response.status, ok: response.ok === true && !!data && data.ok === true, data };
+    }
+
     /** 设置页保存前抓取表单值（纯函数，便于测试）。 */
     function collectAwarenessBody(confirm, draft) {
       return {
@@ -1991,6 +2037,9 @@ window.__ModuleLoader__.load({
       });
       const [petDiy, setPetDiy] = useState(null);
       const [petDraft, setPetDraft] = useState(null);
+      const [importing, setImporting] = useState(false);
+      const [importConflict, setImportConflict] = useState(null);
+      const fileInputRef = useRef(null);
       const [petError, setPetError] = useState('');
       const [petSaving, setPetSaving] = useState(false);
       const aliveRef = useRef(false);
@@ -2168,6 +2217,64 @@ window.__ModuleLoader__.load({
         } else {
           setPetError(`${tRef.current('set.pet.packsError')}：${readableReason(result, tRef.current)}`);
         }
+      };
+
+      /** T30：应用导入结果 —— 刷新 packs 并选中新包（不自动保存 pet-settings）。 */
+      const applyImportedPack = async (data) => {
+        const result = await fetchJson(api('pet-diy'), { timeoutMs: 10_000 });
+        if (!aliveRef.current) return;
+        if (result.ok && result.data && result.data.ok === true) {
+          const snapshot = result.data;
+          setPetDiy(snapshot);
+          const fresh = petDraftFromData(snapshot);
+          const skin = petSkinForFigure(snapshot.packs, data.id, { ...fresh.skin, ...(petDraft && petDraft.skin ? petDraft.skin : {}) });
+          setPetDraft({ ...fresh, skin });
+        }
+        setNotice(tRef.current('set.pet.imported')
+          .replace('{id}', data.id || '')
+          .replace('{version}', typeof data.version === 'string' && data.version !== '' ? ` v${data.version}` : ''));
+      };
+
+      /** T30：处理用户选中的 zip 文件（≤128MB；409 时进入替换确认）。 */
+      const handlePackFile = async (file, options = {}) => {
+        if (!file || importing) return;
+        const replace = options.replace === true;
+        setImportConflict(null);
+        setNotice('');
+        if (typeof file.size === 'number' && file.size > PET_IMPORT_MAX_BYTES) {
+          setError(tRef.current('set.pet.importTooLarge'));
+          return;
+        }
+        setImporting(true);
+        setError('');
+        try {
+          const result = await uploadPetPack(file, replace);
+          if (!aliveRef.current) return;
+          if (result.ok && result.data) {
+            await applyImportedPack(result.data);
+          } else if (result.status === 409) {
+            setImportConflict({
+              file,
+              id: (result.data && result.data.id) || (result.data && result.data.error && result.data.error.id) || '',
+            });
+          } else {
+            const message = result.data && result.data.error && result.data.error.message
+              ? result.data.error.message
+              : readableReason({ ok: false, status: result.status, data: result.data }, tRef.current);
+            setError(`${tRef.current('set.pet.importFailed')}：${message}`);
+          }
+        } finally {
+          if (aliveRef.current) setImporting(false);
+        }
+      };
+
+      /** T30：选中文件（input change）。 */
+      const onPackFileChosen = (event) => {
+        const file = event && event.target && event.target.files && event.target.files[0];
+        if (event && event.target) {
+          try { event.target.value = ''; } catch { /* ignore */ }
+        }
+        if (file) handlePackFile(file);
       };
 
       /** 选择形象包：按新 pack 的 axes 重建合法 skin。 */
@@ -2418,6 +2525,22 @@ window.__ModuleLoader__.load({
           h('div', { className: 'set-group', 'data-pet-diy': '1' },
             h('div', { className: 'set-group-title' }, t('set.group.pet')),
             petError !== '' ? h('div', { className: 'set-note set-note-warn' }, petError) : null,
+            h('div', { className: 'set-row', 'data-pet-import-row': '1' },
+              h('button', {
+                type: 'button',
+                className: 'wp-btn',
+                'data-pet-import': '1',
+                disabled: importing || petDiy === null,
+                onClick: () => { if (fileInputRef.current) fileInputRef.current.click(); },
+              }, importing ? t('set.pet.importing') : t('set.pet.import')),
+              h('input', {
+                ref: fileInputRef,
+                type: 'file',
+                accept: '.zip,application/zip',
+                style: { display: 'none' },
+                onChange: onPackFileChosen,
+              }),
+              h('span', { className: 'set-note' }, t('set.pet.importHint'))),
             petDiy === null || petDraft === null
               ? h('div', { className: 'set-note' }, loading ? t('set.loading') : t('set.pet.currentFallback'))
               : [
@@ -2425,6 +2548,24 @@ window.__ModuleLoader__.load({
                   h('span', { className: 'wp-chip', 'data-pet-summary': '1' },
                     `${t('set.pet.summary')}：${petDiySummary(petDiy, petDraft)}`),
                   h('button', { type: 'button', className: 'wp-btn', onClick: refreshPetPacks }, t('set.pet.refreshPacks'))),
+                h('div', { className: 'set-note', key: 'pet-import-hint' }, t('set.pet.importHint')),
+                importConflict !== null
+                  ? h('div', { className: 'set-note set-note-warn', key: 'pet-import-conflict' },
+                    h('div', {}, t('set.pet.importConflict').replace('{id}', importConflict.id || '?')),
+                    h('div', { className: 'set-actions' },
+                      h('button', {
+                        type: 'button',
+                        className: 'wp-btn wp-btn-primary',
+                        disabled: importing,
+                        onClick: () => { if (importConflict) handlePackFile(importConflict.file, { replace: true }); },
+                      }, t('set.pet.importReplace')),
+                      h('button', {
+                        type: 'button',
+                        className: 'wp-btn',
+                        disabled: importing,
+                        onClick: () => setImportConflict(null),
+                      }, t('set.pet.importCancel'))))
+                  : null,
                 h('div', { className: 'set-row', key: 'pet-pack' },
                   h('span', { className: 'set-row-label' }, t('set.pet.pack')),
                   h('select', {
@@ -3054,6 +3195,10 @@ window.__ModuleLoader__.load({
         petDraftFromData,
         collectPetDiyBody,
         petDiySummary,
+        PET_IMPORT_MAX_BYTES,
+        buildImportPackUrl,
+        summarizeImportPackResult,
+        uploadPetPack,
         WhalePanelShell,
         SettingsPanel,
         SHELL_STYLE_CSS,

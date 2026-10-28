@@ -44,6 +44,7 @@
 
 - 形象包：内置 **whale**（DeepSeek 大肥鱼/女仆）与 **coo**（蓝色 Coo），也可自动发现 Coopanion 里安装的用户形象包 / Steam Workshop 包
 - 外观轴：配色、服装、头顶、耳侧配件、眼镜、颈饰（随形象包定义）
+- 导入形象包：设置 → 桌宠 DIY 支持上传 **Coo 形象包 ZIP**（≤128MB，安全解包、不执行包内代码）
 - 尺寸与界面：scale 0.5–3、气泡大小/字号/速度、光晕、明暗主题、走位、音效、悬停按钮
 - 保存后约 1 秒热生效，不需要重启 DSH
 
@@ -121,7 +122,7 @@ A：改本机设置或 `bridge/config.json` 即可；源码里没有写死任何
 
 ## 版本与文件
 
-- 插件版本：`deep-coo-cloud 2.0.0`
+- 插件版本：`deep-coo-cloud 2.1.0`（新增 ZIP 形象包导入）
 - 安装说明：`INSTALL.md`
 - 打包与隐私流水线：`PACKAGING.md`、`pack/README.md`
 - 界面截图：`images/05-real-ui.png`
