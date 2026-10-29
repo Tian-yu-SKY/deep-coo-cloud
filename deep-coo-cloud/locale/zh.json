@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "deep-coo-cloud",
-    "description": "「deep-coo-cloud」控制台：聊天/总控台/设置/Coo 市场/桌宠 DIY；总控台可把 Coo 市场下载的插件加入 Coopanion 并运行/重启 Coo（不执行扩展代码）。"
+    "description": "「deep-coo-cloud」控制台：聊天/总控台/设置/Coo 市场/桌宠 DIY；总控台含本机桌宠插件状态（前台感知/跨端接话/DIY/看屏幕），Coopanion 扩展收进折叠区；保留远程人格与 QQ 身份。"
   }
 }

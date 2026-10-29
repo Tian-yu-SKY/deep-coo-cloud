@@ -152,7 +152,32 @@ window.__ModuleLoader__.load({
       'cc.section.qq': 'QQ 近况',
       'cc.section.components': '组件状态',
       'cc.section.actions': '操作',
+      'cc.pet.title': '本机桌宠插件',
+      'cc.pet.intro': '这些是本机桌宠（远程 DSH 人格）的原生插件，不是 Coopanion 扩展。',
+      'cc.pet.footer': '保留远程人格、记忆与 QQ 同一身份；这些插件不改变大脑。',
+      'cc.pet.observer.title': '前台感知 / 游戏陪玩',
+      'cc.pet.observer.running': '运行中',
+      'cc.pet.observer.paused': '已暂停',
+      'cc.pet.observer.stopped': '未运行',
+      'cc.pet.observer.pause': '暂停',
+      'cc.pet.observer.resume': '恢复',
+      'cc.pet.observer.noForeground': '暂无前台窗口',
+      'cc.pet.observer.foreground': '前台：{name}（{process}）',
+      'cc.pet.crossChat.title': '跨端接话（QQ ↔ 桌面）',
+      'cc.pet.crossChat.enabled': '已启用',
+      'cc.pet.crossChat.disabled': '未配置',
+      'cc.pet.crossChat.detail': 'QQ 群 {groups} · 私聊 {chats} · 服务器 SSH {ssh}',
+      'cc.pet.diy.title': '桌宠 DIY / 形象包',
+      'cc.pet.diy.detail': '已安装 {n} 个形象包',
+      'cc.pet.screen.title': '看屏幕（实验）',
+      'cc.pet.screen.unavailable': '不可用',
+      'cc.pet.screen.reason': '需要视觉模型：当前远程 DSH 是文本模型，看不到屏幕画面。',
+      'cc.pet.settings': '去设置',
+      'cc.pet.err': '本机桌宠插件状态读取失败',
       'cc.coo.title': 'Coo 插件',
+      'cc.coo.title2': 'Coopanion 扩展（仅 Coo 主程序，不影响本机桌宠）',
+      'cc.coo.collapsedNote': '默认折叠；只有需要给 Coo 主程序安装扩展时才展开。',
+      'cc.coo.statusHeading': 'Coo 主程序状态',
       'cc.coo.running': '运行中 · pid {pid}',
       'cc.coo.stopped': '未运行',
       'cc.coo.openExtensions': '打开安装目录',
@@ -432,7 +457,32 @@ window.__ModuleLoader__.load({
       'cc.section.qq': 'QQ recent',
       'cc.section.components': 'Components',
       'cc.section.actions': 'Actions',
+      'cc.pet.title': 'Local pet plugins',
+      'cc.pet.intro': 'Native plugins of the local pet (remote DSH persona), not Coopanion extensions.',
+      'cc.pet.footer': 'Remote persona, memory and QQ identity stay the same; these plugins never change the brain.',
+      'cc.pet.observer.title': 'Foreground awareness / game companion',
+      'cc.pet.observer.running': 'Running',
+      'cc.pet.observer.paused': 'Paused',
+      'cc.pet.observer.stopped': 'Not running',
+      'cc.pet.observer.pause': 'Pause',
+      'cc.pet.observer.resume': 'Resume',
+      'cc.pet.observer.noForeground': 'No foreground window',
+      'cc.pet.observer.foreground': 'Foreground: {name} ({process})',
+      'cc.pet.crossChat.title': 'Cross-device chat (QQ ↔ desktop)',
+      'cc.pet.crossChat.enabled': 'Enabled',
+      'cc.pet.crossChat.disabled': 'Not configured',
+      'cc.pet.crossChat.detail': 'QQ groups {groups} · privates {chats} · server SSH {ssh}',
+      'cc.pet.diy.title': 'Pet DIY / figure packs',
+      'cc.pet.diy.detail': '{n} figure pack(s) installed',
+      'cc.pet.screen.title': 'Screen look (experimental)',
+      'cc.pet.screen.unavailable': 'Unavailable',
+      'cc.pet.screen.reason': 'Requires a vision model; the remote DSH is text-only and cannot see the screen.',
+      'cc.pet.settings': 'Open settings',
+      'cc.pet.err': 'Failed to read local pet plugin status',
       'cc.coo.title': 'Coo plugins',
+      'cc.coo.title2': 'Coopanion extensions (Coo main app only; does not affect the local pet)',
+      'cc.coo.collapsedNote': 'Collapsed by default; expand only when installing extensions into the Coo main app.',
+      'cc.coo.statusHeading': 'Coo main app status',
       'cc.coo.running': 'Running · pid {pid}',
       'cc.coo.stopped': 'Not running',
       'cc.coo.openExtensions': 'Open extensions dir',
@@ -909,6 +959,74 @@ window.__ModuleLoader__.load({
     }
 
     /** 状态卡片模型（纯函数，供组件与测试使用）。 */
+    /** T34：本机桌宠原生插件 → 总控台行（observer/crossChat/diy/screen）。 */
+    function buildPetPluginRows(data, t) {
+      const source = data && typeof data === 'object' ? data : {};
+      const observer = source.observer && typeof source.observer === 'object' ? source.observer : {};
+      const crossChat = source.crossChat && typeof source.crossChat === 'object' ? source.crossChat : {};
+      const diy = source.diy && typeof source.diy === 'object' ? source.diy : {};
+      const screen = source.screen && typeof source.screen === 'object' ? source.screen : {};
+      const foreground = observer.foreground && typeof observer.foreground === 'object'
+        ? observer.foreground
+        : null;
+      const foregroundName = foreground ? (foreground.title || foreground.process || '') : '';
+      const foregroundProcess = foreground ? (foreground.process || '') : '';
+      const packCount = Number.isFinite(Number(diy.packCount)) ? Number(diy.packCount) : 0;
+      return [
+        {
+          id: 'observer',
+          kind: 'native',
+          title: t('cc.pet.observer.title'),
+          state: observer.paused ? 'warn' : (observer.running ? 'ok' : 'idle'),
+          status: observer.paused
+            ? t('cc.pet.observer.paused')
+            : (observer.running ? t('cc.pet.observer.running') : t('cc.pet.observer.stopped')),
+          detail: foreground
+            ? t('cc.pet.observer.foreground').replace('{name}', foregroundName).replace('{process}', foregroundProcess)
+            : t('cc.pet.observer.noForeground'),
+          action: 'observer',
+          actionLabel: observer.paused ? t('cc.pet.observer.resume') : t('cc.pet.observer.pause'),
+          enabled: true,
+        },
+        {
+          id: 'crossChat',
+          kind: 'native',
+          title: t('cc.pet.crossChat.title'),
+          state: crossChat.configured ? 'ok' : 'idle',
+          status: crossChat.configured ? t('cc.pet.crossChat.enabled') : t('cc.pet.crossChat.disabled'),
+          detail: t('cc.pet.crossChat.detail')
+            .replace('{groups}', String(Number(crossChat.qqGroupsCount) || 0))
+            .replace('{chats}', String(Number(crossChat.qqChatsCount) || 0))
+            .replace('{ssh}', crossChat.sshEnabled ? '✓' : '—'),
+          action: 'settings',
+          actionLabel: t('cc.pet.settings'),
+          enabled: true,
+        },
+        {
+          id: 'diy',
+          kind: 'native',
+          title: t('cc.pet.diy.title'),
+          state: packCount > 0 ? 'ok' : 'idle',
+          status: t('cc.pet.diy.detail').replace('{n}', String(packCount)),
+          detail: diy.packsError ? String(diy.packsError) : (diy.note || ''),
+          action: 'settings',
+          actionLabel: t('cc.pet.settings'),
+          enabled: true,
+        },
+        {
+          id: 'screen',
+          kind: 'native',
+          title: t('cc.pet.screen.title'),
+          state: screen.available === true ? 'ok' : 'warn',
+          status: t('cc.pet.screen.unavailable'),
+          detail: screen.reason ? String(screen.reason) : t('cc.pet.screen.reason'),
+          action: null,
+          actionLabel: '',
+          enabled: false,
+        },
+      ];
+    }
+
     /** T33：合并「已下载」与「已安装」Coo 插件 → 总控台行。 */
     function buildCooPluginRows(pluginData) {
       const data = pluginData && typeof pluginData === 'object' ? pluginData : {};
@@ -1177,6 +1295,22 @@ window.__ModuleLoader__.load({
       '.cc-badge[data-kind="provider"]{color:var(--dsw-alias-state-warn-primary);border-color:var(--dsw-alias-state-warn-tertiary);}',
       '.cc-badge[data-kind="bot"]{color:var(--dsw-alias-brand-primary);}',
       '.cc-coo-confirm{display:flex;flex-direction:column;gap:6px;}',
+      '.cc-coo-details{padding:0;}',
+      '.cc-coo-summary{cursor:pointer;padding:10px 14px;font-size:13px;font-weight:600;',
+      'color:var(--dsw-alias-label-primary);list-style:none;}',
+      '.cc-coo-summary::-webkit-details-marker{display:none;}',
+      '.cc-coo-summary::before{content:"▸ ";color:var(--dsw-alias-label-tertiary);}',
+      '.cc-coo-details[open] > .cc-coo-summary::before{content:"▾ ";}',
+      '.cc-coo-details > .cc-section-head,.cc-coo-details > .cc-actions,.cc-coo-details > .set-note,',
+      '.cc-coo-details > .cc-empty,.cc-coo-details > .cc-coo-rows{padding-left:14px;padding-right:14px;}',
+      '.cc-pet-rows{display:flex;flex-direction:column;gap:8px;}',
+      '.cc-pet-row{display:flex;flex-direction:column;gap:6px;padding:10px 12px;border-radius:10px;',
+      'border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-2);}',
+      '.cc-pet-row[data-state="ok"]{border-color:var(--dsw-alias-state-success-tertiary);}',
+      '.cc-pet-row[data-state="warn"]{border-color:var(--dsw-alias-state-warn-tertiary);}',
+      '.cc-pet-main{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}',
+      '.cc-pet-name{font-size:13px;font-weight:600;color:var(--dsw-alias-label-primary);}',
+      '.cc-pet-detail{font-size:12px;line-height:1.6;color:var(--dsw-alias-label-tertiary);overflow-wrap:anywhere;}',
       '.cc-chip[data-installed="yes"]{color:var(--dsw-alias-state-success-primary);border-color:var(--dsw-alias-state-success-tertiary);}',
       '@media (max-width:720px){.cc-cards{grid-template-columns:repeat(auto-fit,minmax(140px,1fr));}}',
     ].join('');
@@ -1195,6 +1329,8 @@ window.__ModuleLoader__.load({
       const [notice, setNotice] = useState('');
       const [loading, setLoading] = useState(true);
       const [pauseBusy, setPauseBusy] = useState(false);
+      const [petPlugins, setPetPlugins] = useState(null);
+      const [petPluginsError, setPetPluginsError] = useState('');
       const [cooPlugins, setCooPlugins] = useState(null);
       const [cooError, setCooError] = useState('');
       const [cooNotice, setCooNotice] = useState('');
@@ -1216,6 +1352,19 @@ window.__ModuleLoader__.load({
           return result.data;
         }
         setError(`${tRef.current('cc.err.status')}：${readableReason(result, tRef.current)}`);
+        return null;
+      }, []);
+
+      /** T34：拉本机桌宠原生插件状态（observer/跨端/DIY/看屏幕）。 */
+      const loadPetPlugins = useCallback(async () => {
+        const result = await fetchJson(api('pet-plugins'), { timeoutMs: 12_000 });
+        if (!aliveRef.current) return null;
+        if (result.ok && result.data && result.data.ok === true) {
+          setPetPlugins(result.data);
+          setPetPluginsError('');
+          return result.data;
+        }
+        setPetPluginsError(`${tRef.current('cc.pet.err')}：${readableReason(result, tRef.current)}`);
         return null;
       }, []);
 
@@ -1241,11 +1390,13 @@ window.__ModuleLoader__.load({
           if (mounted && aliveRef.current) setLoading(false);
         });
         loadCooPlugins();
+        loadPetPlugins();
         const interval = Number(settings.refreshIntervalMs) || CONTROL_REFRESH_MS;
         const timer = setInterval(() => {
           if (aliveRef.current) {
             load();
             loadCooPlugins();
+            loadPetPlugins();
           }
         }, interval);
         return () => {
@@ -1261,6 +1412,7 @@ window.__ModuleLoader__.load({
           if (aliveRef.current) setLoading(false);
         });
         loadCooPlugins();
+        loadPetPlugins();
       };
 
       /** T33：执行一个 Coo 插件动作（install/uninstall/run/restart）。 */
@@ -1338,6 +1490,7 @@ window.__ModuleLoader__.load({
           if (result.ok && result.data && result.data.ok === true) {
             setNotice(next ? tRef.current('cc.pausedNotice') : tRef.current('cc.resumedNotice'));
             await load();
+            await loadPetPlugins();
           } else {
             setError(readableReason(result, tRef.current));
           }
@@ -1418,10 +1571,40 @@ window.__ModuleLoader__.load({
           h('div', { className: 'cc-card-title' }, card.title),
           h('div', { className: 'cc-card-value' }, card.value),
           card.sub !== '' ? h('div', { className: 'cc-card-sub' }, card.sub) : null))),
-          // ── T33：Coo 插件（下载 → 加入 → 运行/重启）──
-          h('div', { className: 'cc-section', 'data-coo-plugins': '1' },
+          // ── T34：本机桌宠插件（远程 DSH 人格的原生能力；不是 Coopanion 扩展）──
+          h('div', { className: 'cc-section', 'data-pet-plugins': '1' },
             h('div', { className: 'cc-section-head' },
-              h('span', { className: 'cc-section-title' }, t('cc.coo.title')),
+              h('span', { className: 'cc-section-title' }, t('cc.pet.title')),
+              h('span', { className: 'cc-section-meta' }, petPlugins && petPlugins.observer
+                ? (petPlugins.observer.paused ? t('cc.pet.observer.paused')
+                  : (petPlugins.observer.running ? t('cc.pet.observer.running') : t('cc.pet.observer.stopped')))
+                : t('cc.loading'))),
+            h('div', { className: 'set-note' }, t('cc.pet.intro')),
+            petPluginsError !== '' ? h('div', { className: 'set-note set-note-error' }, petPluginsError) : null,
+            petPlugins === null
+              ? h('div', { className: 'cc-empty' }, t('cc.loading'))
+              : h('div', { className: 'cc-pet-rows' }, buildPetPluginRows(petPlugins, t).map((row) => h('div', {
+                className: 'cc-pet-row',
+                key: row.id,
+                'data-plugin': row.id,
+                'data-state': row.state,
+              },
+              h('div', { className: 'cc-pet-main' },
+                h('span', { className: 'cc-pet-name' }, row.title),
+                h('span', { className: 'cc-badge', 'data-state': row.state }, row.status)),
+              row.detail !== '' ? h('div', { className: 'cc-pet-detail' }, row.detail) : null,
+              h('div', { className: 'cc-actions' },
+                row.action === 'observer'
+                  ? h('button', { type: 'button', className: 'wp-btn', disabled: pauseBusy, onClick: togglePause }, pauseBusy ? t('cc.pauseBusy') : row.actionLabel)
+                  : row.action === 'settings'
+                    ? h('button', { type: 'button', className: 'wp-btn', onClick: () => { if (switchTab !== null) switchTab('settings'); } }, row.actionLabel)
+                    : h('button', { type: 'button', className: 'wp-btn', disabled: true }, row.status))))),
+            h('div', { className: 'set-note' }, t('cc.pet.footer'))),
+          // ── T33：Coopanion 扩展（默认折叠，弱化；只影响 Coo 主程序）──
+          h('details', { className: 'cc-section cc-coo-details', 'data-coo-plugins': '1' },
+            h('summary', { className: 'cc-coo-summary' }, t('cc.coo.title2')),
+            h('div', { className: 'cc-section-head' },
+              h('span', { className: 'cc-section-title' }, t('cc.coo.statusHeading')),
               h('span', { className: 'cc-section-meta' },
                 cooPlugins && cooPlugins.coo
                   ? (cooPlugins.coo.running
@@ -3480,6 +3663,7 @@ window.__ModuleLoader__.load({
         surfaceLabel,
         buildControlCards,
         buildCooPluginRows,
+        buildPetPluginRows,
         cooPluginKindLabel,
         buildComponentRows,
         dashboardChip,

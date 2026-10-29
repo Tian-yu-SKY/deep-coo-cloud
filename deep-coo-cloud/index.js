@@ -641,6 +641,11 @@ export function createRouteHandler(settings, deps = {}) {
         if (method !== 'POST') return methodNotAllowed(res, 'POST');
         return await handleCooPluginsOpenDir(req, res, effective, deps);
       }
+      // ── T34：本机桌宠插件（远程人格原生能力，只读聚合；与 Coopanion 扩展无关）──
+      if (path === `${ROUTE_PREFIX}/pet-plugins`) {
+        if (method !== 'GET') return methodNotAllowed(res, 'GET');
+        return await handlePetPluginsGet(res, effective);
+      }
       return sendJson(res, 404, {
         ok: false,
         error: { code: 'not-found', message: `未知的面板接口 ${method} ${path}` },
@@ -1516,6 +1521,71 @@ async function handlePetDiyPost(req, res, settings) {
       error: { code: 'pet-diy-write-failed', message: error instanceof Error ? error.message : String(error) },
     });
   }
+}
+
+// ───────────────────────────── 本机桌宠插件（T34） ─────────────────────────────
+// 「本机桌宠」= dsh-coo-pet-remote（远程 DSH 人格）里的原生能力，不是 Coopanion 扩展。
+// 这个接口只读聚合：context-observer 的前台感知、跨端接话配置、桌宠 DIY 形象包数量、看屏幕可用性。
+// 不执行任何第三方代码、不改变远程 DSH 大脑/记忆/QQ 身份。
+
+/**
+ * `GET /whale-panel/pet-plugins`：本机桌宠原生能力状态。
+ * 只读现有 observer 状态文件 + 设置 + 形象包目录。
+ */
+async function handlePetPluginsGet(res, settings) {
+  const now = Date.now();
+  const components = collectControlComponents(settings, now);
+  const observer = components.observer ?? {};
+  const foreground = observer.lastWindow && typeof observer.lastWindow === 'object'
+    ? {
+      process: typeof observer.lastWindow.process === 'string' ? observer.lastWindow.process : '',
+      title: typeof observer.lastWindow.title === 'string' ? observer.lastWindow.title : '',
+    }
+    : null;
+  const petPaths = petDiyPaths(settings);
+  const scanned = scanFigurePacks(petPaths.packsDir);
+  const packCount = scanned.packs.length;
+  const packs = scanned.packs.slice(0, 40).map((pack) => ({
+    id: pack.id,
+    name: pack.name,
+    version: pack.version,
+  }));
+  const sshEnabled = settings.sshEnabled === true;
+  const qqGroups = Array.isArray(settings.qqPreviewGroups) ? settings.qqPreviewGroups : [];
+  const qqChats = Array.isArray(settings.qqPreviewChats) ? settings.qqPreviewChats : [];
+  const crossChatConfigured = sshEnabled || qqGroups.length > 0 || qqChats.length > 0;
+  const awarenessPatchPath = typeof settings.awarenessPatchPath === 'string' ? settings.awarenessPatchPath : '';
+  return sendJson(res, 200, {
+    ok: true,
+    at: now,
+    observer: {
+      running: observer.running === true,
+      paused: observer.paused === true,
+      pid: Number.isFinite(Number(observer.pid)) ? Number(observer.pid) : null,
+      lastHeartbeatAt: Number.isFinite(Number(observer.lastHeartbeatAt)) ? Number(observer.lastHeartbeatAt) : null,
+      foreground,
+    },
+    crossChat: {
+      configured: crossChatConfigured,
+      sshEnabled,
+      awarenessPatchConfigured: awarenessPatchPath !== '',
+      qqGroupsCount: qqGroups.length,
+      qqChatsCount: qqChats.length,
+      note: '跨端接话 = 本机桌宠与 QQ 共用远程 DSH 人格/记忆；需要配置服务器 SSH 或 QQ 白名单。',
+    },
+    diy: {
+      packCount,
+      packs,
+      packsError: scanned.warnings.length > 0 ? scanned.warnings[0] : null,
+      note: '桌宠 DIY（形象包/大小/气泡/主题）只改本机外观，不改远程人格。',
+    },
+    screen: {
+      available: false,
+      reason: '需要视觉模型：当前远程 DSH 为文本模型，看不到屏幕画面；暂不提供该插件。',
+      requires: 'vision-model',
+    },
+    note: '这些是本机桌宠（远程 DSH 人格）的原生插件，不是 Coopanion 扩展；保留远程人格、记忆与 QQ 同一身份。',
+  });
 }
 
 // ───────────────────────────── Coo 插件列表 / 启动（T33） ─────────────────────────────

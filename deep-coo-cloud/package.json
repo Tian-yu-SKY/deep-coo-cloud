@@ -1,8 +1,8 @@
 {
   "name": "deep-coo-cloud",
-  "version": "2.2.1",
+  "version": "2.3.0",
   "private": true,
-  "description": "deep-coo-cloud：Coo 桌宠 × 云端 DSH 人格控制台（本机 DSH Web UI：聊天/总控台/设置/Coo 市场/桌宠 DIY）。总控台含 Coo 插件列表：把 Coo 市场下载的扩展加入 Coopanion 并一键运行/重启 Coo；支持导入形象包 ZIP；不执行扩展代码。",
+  "description": "deep-coo-cloud：Coo 桌宠 × 云端 DSH 人格控制台（本机 DSH Web UI：聊天/总控台/设置/Coo 市场/桌宠 DIY）。总控台含「本机桌宠插件」（前台感知/跨端接话/DIY/看屏幕状态）与折叠的 Coopanion 扩展管理；不执行扩展代码、不改变远程人格。",
   "type": "module",
   "main": "index.js",
   "exports": {
