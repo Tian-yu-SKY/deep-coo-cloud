@@ -1,9 +1,0 @@
-{
-  "name": "cortico-world-screen-look",
-  "version": "0.1.0",
-  "description": "look at screen",
-  "cortico": {
-    "kind": "world",
-    "displayName": "屏幕查看"
-  }
-}
