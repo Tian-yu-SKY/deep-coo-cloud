@@ -89,6 +89,7 @@ chatRounds: 3
 | `bridgeSessionId` | `pet-local` | bridge 那一端给桌宠用的会话 id（只用于显示/对接） |
 | `packsExtraDirs` | 派生默认 | 额外形象包根目录（另自动加 `<cooDataRoot>/figures`、`<dataDir>/figures`、`COOPANION_PACK_ROOTS`） |
 | `settingsFile` | `<dataDir>/pet-settings.json` | DIY 设置文件（鲸歌面板/换装页/手改都写它，~1s 热应用） |
+| `screenAutoLook` 等 | 见下 | **v0.4.6** 自动看屏幕：`screenAutoLook`(false) / `screenIntervalMs`(180000) / `screenMinGapMs`(120000) / `screenMaxPerHour`(8) / `visionEndpoint`(`http://127.0.0.1:11434`) / `visionModel`(`qwen2.5vl:3b`) / `visionPrompt` / `visionTimeoutMs`(120000) / `screenShotDir`(空=`<dataDir>/screenshots`)；实际开关以 `<dataDir>/screen-autolook.json` 为准（面板写） |
 | `dshPanelUrl` | 空 | **v0.4.3**：换装页地板「聊天气泡」按钮打开的本机 DSH 面板地址（http(s)）。为空时只提示、不打开；本机地址用覆盖 bundle 注入 |
 | `brain` | `remote` | 改 `local` / `session` 可不需要 bridge |
 
@@ -171,6 +172,15 @@ plugin_manager { action: "set_bundle", target: "dsh-coo-pet-remote", enabled: tr
       非法 action → 400；`GET /api/dock` → 405（`<origin>` 取 `pet_status` 的「气泡连接」）
 - [ ] 未配置 `dshPanelUrl` 时点聊天气泡：只记日志/返回提示，不打开任何页面；配好后才用系统浏览器打开
 
+**自动看屏幕（v0.4.6）**
+
+- [ ] 面板打开「自动看屏幕」→ `<dataDir>/screen-autolook.json` 变 `{enabled:true}`；`pet_status` 行变 `看屏幕(自动): 开`
+- [ ] 等待 ≥ `screenMinGapMs`（默认 2 分钟）：`<dataDir>/screenshots/` 出现 `auto-*.jpg`，`screen-look-state.json` 的 `totalLooks` 增加、`lastCaption` 有描述
+- [ ] 若她决定说话：气泡出一句 ≤80 字短句；`lastSpoken`/`totalSpoken` 更新；回 `[沉默]` 时不出气泡（`totalSpoken` 不涨）
+- [ ] 同屏不改动时不重复调模型（`lastLookAt` 更新、日志无新推理）；bridge 忙/断时整轮跳过，恢复后继续
+- [ ] 关闭面板开关 → 下一 tick 起不再截图，`pet_status` 显示 `关`
+- [ ] 截图只在 `<dataDir>/screenshots`（最多 10 张）；全程只有文字 caption 发给远程人格
+
 **安全/隐私**
 
 - [ ] Coopanion 安装目录未被改写（插件只复制素材到 dataDir）
@@ -209,6 +219,9 @@ plugin_manager { action: "set_bundle", target: "dsh-coo-pet-remote", enabled: tr
 | 用户 pack 不出现 | 放错层级 / `figure.json` 坏 / id 不合法 / `web/<id>` 已存在 | 检查 `<cooDataRoot>/figures/<id>/figure.json` 或 `<dataDir>/figures/<id>/`；`id` 要求 `[a-z0-9][a-z0-9-]*`；看启动日志 `形象包 N 个` 与 `/api/figures/status` 的 `problems`；重载插件 |
 | `pet-settings.json` 改了没生效 | 不是合法 JSON / 字段名错 / 值非法被忽略 | 看 DSH 日志 `[桌宠] DIY 设置:` warning；确认 `pet_status` 里「DIY 设置:」指向的就是你改的文件（`settingsFile`） |
 | 换装页保存后外观回退 | 设置文件与换装页并发写（后写者赢） | 重新保存一次；或直接手改 `pet-settings.json`（它有合并/校验） |
+| 自动看屏不开/没反应 | 开关文件没写 / 间隔未到 / PAUSED / bridge 忙 / Ollama 未运行 | 看 `<dataDir>/screen-autolook.json` 是否 `enabled:true`；`screen-look-state.json` 的 `lastError`；`curl http://127.0.0.1:11434/api/tags`；删 `context-observer/PAUSED`；等过 `screenMinGapMs` |
+| 自动看屏截图失败 | 非 Windows / PowerShell 被禁 / 无桌面会话 | 日志 `自动看屏`/`截图失败`；只支持 Windows 本机交互桌面 |
+| 自动看屏不冒气泡但 totalLooks 在涨 | 同屏 dHash 跳过 / caption 相似跳过 / 回了 `[沉默]` / brain 忙 | 看日志与 `screen-look-state.json` 的 `lastSpoken`/`lastError`；这是预期的“不打扰”行为 |
 | 热重载后窗口没回来 | 插件重挂载后窗口需重开 | `pet_window { action: "open" }`；仍不行再考虑重启 DSH |
 
 ---

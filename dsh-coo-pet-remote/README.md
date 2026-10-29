@@ -1,6 +1,6 @@
 # dsh-coo-pet
 
-> **This directory is a fork: `dsh-coo-pet-remote` 0.4.5-remote.1 (portable/distributable build).**
+> **This directory is a fork: `dsh-coo-pet-remote` 0.4.7-remote.1 (portable/distributable build).**
 > On top of upstream v0.2.1's `local` / `session` brains it adds **`brain: remote`**:
 > this desktop pet is only a display; the conversation runs in a **remote DSH session**
 > through a local **bridge** WebSocket, so the role card / memory / mood all come from the remote side.
@@ -11,6 +11,10 @@
 > Since v1.2 it supports **multiple figure packs** (built-in coo/whale + user/Workshop packs) and a
 > **DIY settings file** `dataDir/pet-settings.json` (figure axes / scale / bubble / theme … hot-applied
 > within ~1s).
+> Since v0.4.6 she can also look at the screen on her own (when the panel toggle is on): the plugin
+> screenshots the main screen locally (only under `dataDir/screenshots`), captions it with a local
+> loopback Ollama vision model, and lets the same remote persona decide whether to say one bubble line
+> (`[沉默]` = stay quiet). Only the text caption is sent to the remote brain; images never leave the machine.
 > Since v0.4.4 the 6 decorative icons on the dressing page floor (`/dress`) are real buttons
 > (settings panel / figure folder / project home / mail / sound toggle / chat panel; whitelisted `POST /api/dock`).
 

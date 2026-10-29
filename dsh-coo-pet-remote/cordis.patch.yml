@@ -89,3 +89,13 @@
         # packsExtraDirs: ['<extra figure pack root>']
         # settingsFile: '<path to pet-settings.json>'
         # dshPanelUrl: '<your DSH panel URL>'
+        # v0.4.6 自动看屏幕(默认关;面板写 <dataDir>/screen-autolook.json 开关)
+        # screenAutoLook: false
+        # screenIntervalMs: 180000
+        # screenMinGapMs: 120000
+        # screenMaxPerHour: 8
+        # visionEndpoint: 'http://127.0.0.1:11434'
+        # visionModel: 'qwen2.5vl:3b'
+        # visionPrompt: '用两三句中文描述这张屏幕截图。'
+        # visionTimeoutMs: 120000
+        # screenShotDir: '<your screenshots dir>'   # 空 = <dataDir>/screenshots

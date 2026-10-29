@@ -264,6 +264,10 @@ export async function setup(ctx, config = {}) {
   const {
     DOCK_ACTIONS, DOCK_LABELS, DOCK_STYLE, executeDockAction,
   } = await import(`./dock.mjs?v=${rev}`);
+  // v0.4.6:自动看屏幕(本机截图 + 回环 Ollama caption → 远程人格决定说不说)
+  const {
+    createScreenAutoLook, isContextPaused,
+  } = await import(`./screen-look.mjs?v=${rev}`);
 
   const log = (...a) => ctx.logger?.info?.('[桌宠]', ...a);
   const dataDir = resolveDataDir(config, log);
@@ -311,6 +315,22 @@ export async function setup(ctx, config = {}) {
    * `dshPanelUrl: 'http://127.0.0.1:<panel-port>'`。空时按钮只给提示,不打开任何东西。
    */
   const dshPanelUrl = String(config.dshPanelUrl ?? '').trim();
+
+  /**
+   * v0.4.6 自动看屏幕(默认关;面板写 `<dataDir>/screen-autolook.json` 开启)。
+   * 这里只做配置解析与取值;调度/截图/视觉/说话在 `lib/screen-look.mjs`(可注入、可单测)。
+   */
+  const screenLookConfig = {
+    screenAutoLook: config.screenAutoLook === true,
+    screenIntervalMs: Number(config.screenIntervalMs),
+    screenMinGapMs: Number(config.screenMinGapMs),
+    screenMaxPerHour: Number(config.screenMaxPerHour),
+    visionEndpoint: String(config.visionEndpoint ?? '').trim(),
+    visionModel: String(config.visionModel ?? '').trim(),
+    visionPrompt: String(config.visionPrompt ?? '').trim(),
+    visionTimeoutMs: Number(config.visionTimeoutMs),
+    screenShotDir: String(config.screenShotDir ?? '').trim(),
+  };
 
   /** 解析软链接后的真实路径;解析不了就原样返回。 */
   const realPath = (p) => {
@@ -981,6 +1001,27 @@ export async function setup(ctx, config = {}) {
     return echo ? '' : out;
   }
 
+  /* ---------- v0.4.6 自动看屏幕(默认关)---------- */
+  /**
+   * 她「自己想看屏幕就看」：每 5s 检查一次开关/间隔/限流，满足条件就
+   * 截本机主屏 → 本机 Ollama caption → 用同一份远程人格决定说不说 → 说了才冒气泡。
+   *
+   * 安全：截图只落本机 `<dataDir>/screenshots`；**只把文字 caption** 拼进提示词发给
+   * 远程大脑；没有第二条通道、不上传图片。bridge 断/大脑忙时整轮跳过，不排队。
+   */
+  const screenLook = createScreenAutoLook({
+    dataDir,
+    config: screenLookConfig,
+    log,
+    getBrain: () => brain,
+    // remote 模式 bridge 没连上就别看（看了也说不出来，还白烧一次推理）
+    isBrainAvailable: () => (brainKind === 'remote' ? brain.connected === true : true),
+    brainSay: (prompt) => brainSay(prompt),
+    say: (text, actions) => say(text, actions),
+    // 情境观察器有 PAUSED（默认 <dataDir>/../context-observer/PAUSED，或环境变量）就跳过
+    isPaused: () => isContextPaused({ dataDir }),
+  });
+
   /* ---------- 主人跟桌宠说话 → 大脑 → 气泡 ---------- */
   async function onUserText(text) {
     if (!text) return;
@@ -1167,10 +1208,14 @@ export async function setup(ctx, config = {}) {
   void start();
   // DIY 设置:文件不存在就按配置默认值生成一份;之后每 ~1s 轮询内容变化并热应用。
   startSettingsWatch();
+  // v0.4.6 自动看屏幕:默认关;面板写 screen-autolook.json 后 5s 内开始按间隔检查。
+  screenLook.start();
+  if (screenLook.enabled()) log('自动看屏幕:已开启(面板开关)');
 
   ctx.effect(() => () => {
     stopSpar();
     stopSettingsWatch();
+    screenLook.stop();
     void brain.stop?.();
     void window.stop();
     void server.stop();
@@ -1278,6 +1323,7 @@ export async function setup(ctx, config = {}) {
           + ` sound=${PREF.sound} frameRate=${PREF.frameRate} hoverButtons=[${(PREF.hoverButtons ?? []).join(',')}]`,
         `形象包:${PACKS.length} 个 [${PACKS.map((pack) => pack.id).join(', ') || '无'}] — ${realPath(WEB_DIR)}`,
         `DIY 设置:${realPath(settingsPath)}${existsSync(settingsPath) ? '' : '(文件缺失,已用默认值)'} —— 改这个文件 ~1s 生效`,
+        screenLook.statusLine(),
         moodLine,
         `聊天开关:${sparring ? '开着(正在跟她聊)' : '关着'}`,
         `Coo 那边:127.0.0.1:${port},名字「${botName}」,${realPath(cooDataRoot)}`,

@@ -179,6 +179,13 @@ window.__ModuleLoader__.load({
       'cc.pet.screen.failed': '看屏幕失败',
       'cc.pet.screen.empty': '视觉模型没有返回描述。',
       'cc.pet.screen.privacy': '截图只保存在本机 coo-pet-data/screenshots/latest.jpg，只发给本机回环 Ollama。',
+      'cc.pet.screen.autoOn': '自动看屏幕：开',
+      'cc.pet.screen.autoOff': '自动看屏幕：关',
+      'cc.pet.screen.autoNone': '还没看过',
+      'cc.pet.screen.autoLine': '上次看 {time} · 共 {count} 次',
+      'cc.pet.screen.autoSpoken': '上次说：「{text}」',
+      'cc.pet.screen.autoError': '自动看屏幕错误：{error}',
+      'cc.pet.screen.autoLoading': '切换中…',
       'cc.pet.settings': '去设置',
       'cc.pet.err': '本机桌宠插件状态读取失败',
       'cc.coo.title': 'Coo 插件',
@@ -491,6 +498,13 @@ window.__ModuleLoader__.load({
       'cc.pet.screen.failed': 'Screen look failed',
       'cc.pet.screen.empty': 'The vision model returned no caption.',
       'cc.pet.screen.privacy': 'Screenshot stays in local coo-pet-data/screenshots/latest.jpg and is sent only to loopback Ollama.',
+      'cc.pet.screen.autoOn': 'Auto look: on',
+      'cc.pet.screen.autoOff': 'Auto look: off',
+      'cc.pet.screen.autoNone': 'Not looked yet',
+      'cc.pet.screen.autoLine': 'Last look {time} · {count} total',
+      'cc.pet.screen.autoSpoken': 'Last spoke: "{text}"',
+      'cc.pet.screen.autoError': 'Auto look error: {error}',
+      'cc.pet.screen.autoLoading': 'Switching…',
       'cc.pet.settings': 'Open settings',
       'cc.pet.err': 'Failed to read local pet plugin status',
       'cc.coo.title': 'Coo plugins',
@@ -973,6 +987,19 @@ window.__ModuleLoader__.load({
     }
 
     /** 状态卡片模型（纯函数，供组件与测试使用）。 */
+    /** T37：自动看屏幕状态行（上次看 HH:MM · 共 N 次 · 上次说「…」）。 */
+    function formatScreenAutoLine(auto, t) {
+      const source = auto && typeof auto === 'object' ? auto : {};
+      const lastLookAt = Number(source.lastLookAt);
+      if (!Number.isFinite(lastLookAt) || lastLookAt <= 0) return t('cc.pet.screen.autoNone');
+      let line = t('cc.pet.screen.autoLine')
+        .replace('{time}', formatClock(lastLookAt))
+        .replace('{count}', String(Number(source.totalLooks) || 0));
+      const spoken = typeof source.lastSpoken === 'string' ? source.lastSpoken.trim() : '';
+      if (spoken !== '') line += ` · ${t('cc.pet.screen.autoSpoken').replace('{text}', spoken.slice(0, 80))}`;
+      return line;
+    }
+
     /** T34：本机桌宠原生插件 → 总控台行（observer/crossChat/diy/screen）。 */
     function buildPetPluginRows(data, t) {
       const source = data && typeof data === 'object' ? data : {};
@@ -1039,6 +1066,7 @@ window.__ModuleLoader__.load({
           action: 'screen',
           actionLabel: t('cc.pet.screen.look'),
           enabled: screen.available === true,
+          auto: screen.auto && typeof screen.auto === 'object' ? screen.auto : null,
         },
       ];
     }
@@ -1331,6 +1359,7 @@ window.__ModuleLoader__.load({
       'border:1px dashed var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);}',
       '.cc-screen-caption-head{display:flex;align-items:center;justify-content:space-between;gap:8px;',
       'font-size:12px;font-weight:600;color:var(--dsw-alias-label-secondary);}',
+      '.cc-pet-auto{font-size:12px;line-height:1.6;color:var(--dsw-alias-label-secondary);overflow-wrap:anywhere;}',
       '.cc-screen-caption-body{max-height:180px;overflow:auto;white-space:pre-wrap;font-size:12px;',
       'line-height:1.7;color:var(--dsw-alias-label-primary);overflow-wrap:anywhere;}',
       '.cc-chip[data-installed="yes"]{color:var(--dsw-alias-state-success-primary);border-color:var(--dsw-alias-state-success-tertiary);}',
@@ -1354,6 +1383,7 @@ window.__ModuleLoader__.load({
       const [petPlugins, setPetPlugins] = useState(null);
       const [petPluginsError, setPetPluginsError] = useState('');
       const [screenLoading, setScreenLoading] = useState(false);
+      const [screenAutoBusy, setScreenAutoBusy] = useState(false);
       const [screenResult, setScreenResult] = useState(null);
       const [screenError, setScreenError] = useState('');
       const [cooPlugins, setCooPlugins] = useState(null);
@@ -1408,6 +1438,31 @@ window.__ModuleLoader__.load({
           }
         } finally {
           if (aliveRef.current) setScreenLoading(false);
+        }
+      };
+
+      /** T37：切换自动看屏幕（写 screen-autolook.json，由 T36 桌宠插件读取）。 */
+      const toggleScreenAuto = async () => {
+        if (screenAutoBusy) return;
+        const current = !!(petPlugins && petPlugins.screen && petPlugins.screen.auto
+          && petPlugins.screen.auto.enabled === true);
+        setScreenAutoBusy(true);
+        setScreenError('');
+        try {
+          const result = await fetchJson(api('pet-plugins/screen-auto'), {
+            method: 'POST',
+            body: { enabled: !current },
+            timeoutMs: 10_000,
+          });
+          if (!aliveRef.current) return;
+          if (result.ok && result.data && result.data.ok === true) {
+            setNotice(result.data.note || '');
+            await loadPetPlugins();
+          } else {
+            setScreenError(readableReason(result, tRef.current));
+          }
+        } finally {
+          if (aliveRef.current) setScreenAutoBusy(false);
         }
       };
 
@@ -1636,18 +1691,31 @@ window.__ModuleLoader__.load({
                 h('span', { className: 'cc-pet-name' }, row.title),
                 h('span', { className: 'cc-badge', 'data-state': row.state }, row.status)),
               row.detail !== '' ? h('div', { className: 'cc-pet-detail' }, row.detail) : null,
+              row.action === 'screen' ? h('div', { className: 'cc-pet-auto', 'data-screen-auto-line': '1' }, formatScreenAutoLine(row.auto, t)) : null,
+              row.auto && row.auto.lastError ? h('div', { className: 'set-note set-note-warn' },
+                t('cc.pet.screen.autoError').replace('{error}', String(row.auto.lastError))) : null,
               h('div', { className: 'cc-actions' },
                 row.action === 'observer'
                   ? h('button', { type: 'button', className: 'wp-btn', disabled: pauseBusy, onClick: togglePause }, pauseBusy ? t('cc.pauseBusy') : row.actionLabel)
                   : row.action === 'settings'
                     ? h('button', { type: 'button', className: 'wp-btn', onClick: () => { if (switchTab !== null) switchTab('settings'); } }, row.actionLabel)
                     : row.action === 'screen'
-                      ? h('button', {
-                        type: 'button',
-                        className: 'wp-btn wp-btn-primary',
-                        disabled: screenLoading || row.enabled !== true,
-                        onClick: lookAtScreen,
-                      }, screenLoading ? t('cc.pet.screen.loading') : row.actionLabel)
+                      ? h('div', { className: 'cc-actions' },
+                        h('button', {
+                          type: 'button',
+                          className: 'wp-btn wp-btn-primary',
+                          disabled: screenLoading || row.enabled !== true,
+                          onClick: lookAtScreen,
+                        }, screenLoading ? t('cc.pet.screen.loading') : row.actionLabel),
+                        h('button', {
+                          type: 'button',
+                          className: 'wp-btn',
+                          'data-screen-auto': '1',
+                          disabled: screenAutoBusy || row.enabled !== true,
+                          onClick: toggleScreenAuto,
+                        }, screenAutoBusy
+                          ? t('cc.pet.screen.autoLoading')
+                          : (row.auto && row.auto.enabled === true ? t('cc.pet.screen.autoOn') : t('cc.pet.screen.autoOff'))))
                       : h('button', { type: 'button', className: 'wp-btn', disabled: true }, row.status))))),
             screenError !== '' ? h('div', { className: 'set-note set-note-error' }, screenError) : null,
             screenResult !== null
@@ -3723,6 +3791,7 @@ window.__ModuleLoader__.load({
         buildControlCards,
         buildCooPluginRows,
         buildPetPluginRows,
+        formatScreenAutoLine,
         cooPluginKindLabel,
         buildComponentRows,
         dashboardChip,

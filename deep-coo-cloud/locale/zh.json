@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "deep-coo-cloud",
-    "description": "「deep-coo-cloud」控制台：聊天/总控台/设置/Coo 市场/桌宠 DIY；总控台可看屏幕（本机 Ollama 视觉模型，截图只存本机）、前台感知/跨端接话/DIY 状态，Coopanion 扩展折叠；保留远程人格与 QQ 身份。"
+    "description": "「deep-coo-cloud」控制台：聊天/总控台/设置/Coo 市场/桌宠 DIY；总控台可手动/自动看屏幕（本机 Ollama，自动看屏幕配合 T36 桌宠插件，截图只存本机），并显示前台感知/跨端接话/DIY 状态。"
   }
 }

@@ -13,7 +13,7 @@ T24 加「Coo 市场」Tab：浏览 npm 上的 Coo/Coopanion 扩展（Cortico �
 - Host 半：`index.js` —— 在 DSH Web 服务器注册同源路由 `/whale-panel/*`（聊天/设置/服务器 QQ 配置）与 `/control-center/*`（状态聚合/PAUSED，Tab 内复用），代理 bridge HTTP、转发 bridge token、按需 ssh 读写服务器 awareness patch。
 - Client 半：`client.js` —— 注册**一个** `sidebar.panellist`（id=`whale-chat`、label=「鲸歌」、order=5）与一个 `main` keyed 整页 Tab 外壳。
 - 无构建步骤（纯 ESM/CJS 工厂 bundle）；样式只用 DSH 主题 token（`--dsw-alias-*`），跟随明暗主题。
-- 版本：`2.4.0`（T35 看屏幕接入本机 Ollama 视觉模型；包名 `deep-coo-cloud`）；离线测试 **147 项**（host / client / manifest / control-center / settings / pet-diy / pet-diy-import / coo-market / coo-market-download / coo-plugins / pet-plugins / vision 十二组）。
+- 版本：`2.5.0`（T37 自动看屏幕开关/状态，配合 T36 桌宠插件；包名 `deep-coo-cloud`）；离线测试 **151 项**（host / client / manifest / control-center / settings / pet-diy / pet-diy-import / coo-market / coo-market-download / coo-plugins / pet-plugins / vision 十二组）。
 - **可分发**：默认配置不含任何本机/服务器私有信息（IP/域名/QQ 号/路径/SSH key/token）；侧栏名称、面板标题、Tab 文案、桥接地址、服务器 SSH、QQ 白名单均可在「设置 → 通用/连接」里配置（保存到 `whale-panel/settings.json`）。
 - 「设置 → 桌宠 DIY」依赖 coo-fork 桌宠插件 **`dsh-coo-pet-remote@0.4.0-remote.1`**（T22）：写 `coo-pet-data/pet-settings.json` 后插件 ~1s 热应用；该插件 config 未覆盖 settingsFile，默认路径与本插件默认一致。
 
@@ -146,8 +146,10 @@ B 方案不碰大脑：只在本机桌宠侧聚合/开关原生能力，保留�
 - **Host `GET /whale-panel/pet-plugins`**（只读）：聚合
   `observer{running,paused,pid,lastHeartbeatAt,foreground{process,title}}`（读 context-observer 状态）、
   `crossChat{configured,sshEnabled,awarenessPatchConfigured,qqGroupsCount,qqChatsCount}`、
-  `diy{packCount,packs[]}`（扫 `coo-pet-data/web`）、`screen{available,model,endpoint,reason,requires:'vision-model'}`
-  （真实探测本机 Ollama `/api/tags`）。不执行任何第三方代码、不改设置。
+  `diy{packCount,packs[]}`（扫 `coo-pet-data/web`）、`screen{available,model,endpoint,reason,requires:'vision-model',
+  auto:{enabled,lastLookAt,lastSpokenAt,lastCaption,lastSpoken,totalLooks,totalSpoken,lastError}}`
+  （真实探测本机 Ollama `/api/tags`；auto 读 T36 的 `screen-look-state.json`/`screen-autolook.json`）。
+  不执行任何第三方代码、不改设置。
 - **总控台 UI「本机桌宠插件」卡**（状态卡片之后）：
   - 前台感知 / 游戏陪玩：运行中/已暂停 + 当前前台窗口（进程/标题）；按钮「暂停/恢复」复用现有
     `POST /control-center/pause-context`；
@@ -156,6 +158,10 @@ B 方案不碰大脑：只在本机桌宠侧聚合/开关原生能力，保留�
   - 看屏幕（T35）：真实探测本机 Ollama（`GET /api/tags`，1.5s 超时、缓存 10s）；可用时显示「看一眼屏幕」按钮，
     点击 → PowerShell 截主屏 1280×720 JPEG（存 `<coo-pet-data>/screenshots/latest.jpg`）→ 本机 Ollama
     `qwen2.5vl:3b` 生成中文 caption（显示在卡片内，可滚动；截图只存本机、只发回环 Ollama）；不可用时禁用+原因；
+  - **自动看屏幕（T37，配合 T36）**：同一行有「自动看屏幕：开/关」按钮（`POST /whale-panel/pet-plugins/screen-auto`
+    原子写 `<coo-pet-data>/screen-autolook.json` 供桌宠插件读取），并显示
+    `上次看 HH:MM · 共 N 次 · 上次说：「…」`（读 `<coo-pet-data>/screen-look-state.json`，无数据「还没看过」）；
+    自动节奏/间隔/限流/相似度去重/说不说由 T36 桌宠插件负责，本面板只做开关与展示；
   - 底部说明：保留远程人格、记忆与 QQ 同一身份，这些插件不改变大脑。
 - **原「Coo 插件」卡**改为默认折叠的 `<details>`，标题「Coopanion 扩展（仅 Coo 主程序，不影响本机桌宠）」；
   安装/运行/重启只影响 Coo 主程序，不再作为本机桌宠的主操作。
@@ -188,6 +194,7 @@ bridge 的 HTTP 接口（`/health` `/history` `/say` …）**没有 CORS 头**�
   POST /whale-panel/pet-diy/import-pack ────▶  原始 ZIP（≤128MB）→ 安全校验/解包 → coo-pet-data/figures|web/<id>（不执行）
   GET  /whale-panel/pet-plugins        ──────▶  本机桌宠原生插件状态（observer/跨端/DIY/看屏幕探测；只读）
   POST /whale-panel/screen-look        ──────▶  截图 1280×720 JPEG → 本机 Ollama 视觉模型 → caption（只发回环）
+  POST /whale-panel/pet-plugins/screen-auto ─▶  写 `<coo-pet-data>/screen-autolook.json` {enabled}（T36 读取；原子写）
   GET  /whale-panel/coo-plugins        ──────▶  已下载/已安装 Coo 插件 + Coopanion 主程序状态（缓存 ~3s）
   POST /whale-panel/coo-plugins/install|uninstall  ─▶  pnpm add/remove（confirm；需重启 Coopanion）
   POST /whale-panel/coo-plugins/run|restart        ─▶  spawn Coopanion.exe / 只杀主程序后重启（不杀 pet-host）
@@ -409,6 +416,18 @@ errors: 无
 - T26 新增测试：默认通用值、UI/桥接/SSH/QQ 白名单校验与保存、显式空 SSH → `GET settings` 返回 disabled 且 `apply-awareness` 400 `ssh-disabled`、`GET /config` 下发 ui/sshEnabled/qqDefaults/paths、client `localizeWithUi`/Tab 文案覆盖/设置页「通用 / 连接」渲染。
 - 未实测真实「局域网 bridge」与真实 SSH 应用（默认禁用；需要的用户填 `serverSshHost` 后用）。全部测试离线 mock。
 
+### T37 联调记录（2026-10-29，未安装、未重启本机 DSH）
+
+- 离线测试 **151/151 PASS**：新增 pet-plugins 用例（GET screen.auto 默认空/读 `screen-look-state.json` 全字段/
+  只有 `screen-autolook.json` 时 enabled 回退；POST screen-auto 写入 `{enabled,updatedAt}` 原子文件、非法 body 400、
+  403/405）+ client 用例（`formatScreenAutoLine` 无数据/次数/上次说、screen 行携带 auto 状态、中英文案）。
+- 与 T36 的互操作文件约定（已实现）：
+  - 面板写 `<cooPetDataRoot>/screen-autolook.json`：`{enabled:boolean, updatedAt}`（T36 读 enabled）；
+  - 面板只读 `<cooPetDataRoot>/screen-look-state.json`：`{enabled,lastLookAt,lastSpokenAt,lastCaption,lastSpoken,totalLooks,totalSpoken,lastError}`
+    （时间戳均为 **epoch 毫秒**；T36 内部的 `lastHash/nextDueAt` 等调度字段面板忽略；文件缺失/坏 JSON 时显示「还没看过」）。
+  - T36 每 5s tick 读 `screen-autolook.json` 只看 `enabled`（忽略 `updatedAt`）；文件缺失回落 Config `screenAutoLook`。
+- 未安装/未 reload DSH；未真实打开自动看屏幕（T36 插件需 reload 后才会读开关）。
+
 ### T35 联调记录（2026-10-29，未安装、未重启本机 DSH）
 
 - 离线测试 **147/147 PASS**，新增 `vision.test.mjs` 6 项：endpoint 回环校验、probeVision
@@ -564,6 +583,8 @@ errors: 无
 41. **「本机桌宠插件」卡聚合现有原生能力、不执行第三方代码**：前台感知/跨端接话/DIY 的状态来自 observer 状态文件与设置；「看屏幕」需要本机 Ollama 运行且装有 `visionModel`（默认 qwen2.5vl:3b），探测失败/未运行时按钮禁用并显示原因。
 42. **看屏幕截图只存本机**：`coo-pet-data/screenshots/latest.jpg`（可配 `screenShotDir`），只发回环 Ollama；截图本身是当前主屏内容，请在知情下使用；推理超时/模型崩会返回可读 502/504。
 43. **Coopanion 扩展卡默认折叠且只影响 Coo 主程序**：不影响本机桌宠/远程人格/QQ；「加入并运行」不再是主操作，需展开后显式确认。
+44. **自动看屏幕开关只写本机开关文件**：实际节奏/间隔/限流/相似度去重/是否说话由 T36 桌宠插件负责；T36 未安装/未 reload 时开关只落盘不生效。
+45. **screen.auto 状态只读 T36 的输出文件**：`screen-look-state.json` 不存在/损坏时显示「还没看过」，不报错；自动看屏幕仍受 T36 自己的暂停（context-observer PAUSED）与 brain busy 约束。
 
 ## 6. 文件
 

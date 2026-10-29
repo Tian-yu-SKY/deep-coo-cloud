@@ -50,3 +50,14 @@
 
     # 换装页「聊天气泡」按钮要打开的本机 DSH 面板地址（空 = 只提示不打开）
     # dshPanelUrl: '<DSH_PANEL_URL>'
+
+    # 自动看屏幕(默认关；面板写 <DATA_DIR>/screen-autolook.json 开关)
+    # screenAutoLook: false
+    # screenIntervalMs: 180000
+    # screenMinGapMs: 120000
+    # screenMaxPerHour: 8
+    # visionEndpoint: 'http://127.0.0.1:11434'
+    # visionModel: 'qwen2.5vl:3b'
+    # visionPrompt: '用两三句中文描述这张屏幕截图。'
+    # visionTimeoutMs: 120000
+    # screenShotDir: '<SCREENSHOTS_DIR>'

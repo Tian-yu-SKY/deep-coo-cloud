@@ -670,6 +670,11 @@ export function createRouteHandler(settings, deps = {}) {
         if (method !== 'POST') return methodNotAllowed(res, 'POST');
         return await handleScreenLook(req, res, effective, deps);
       }
+      // ── T37：自动看屏幕开关（写 screen-autolook.json 给 T36 桌宠插件读）──
+      if (path === `${ROUTE_PREFIX}/pet-plugins/screen-auto`) {
+        if (method !== 'POST') return methodNotAllowed(res, 'POST');
+        return await handleScreenAutoToggle(req, res, effective);
+      }
       return sendJson(res, 404, {
         ok: false,
         error: { code: 'not-found', message: `未知的面板接口 ${method} ${path}` },
@@ -1547,6 +1552,75 @@ async function handlePetDiyPost(req, res, settings) {
   }
 }
 
+// ───────────────────────────── 自动看屏幕开关（T37，配合 T36） ─────────────────────────────
+// 面板只读写两个本机小文件：screen-autolook.json（开关，面板写/T36 读）与
+// screen-look-state.json（T36 写的运行状态，面板只读）。不执行任何第三方代码。
+
+export const SCREEN_AUTO_FILE = 'screen-autolook.json';
+export const SCREEN_STATE_FILE = 'screen-look-state.json';
+
+/** 读 T36 自动看屏幕状态（不存在/损坏 → 默认空，不报错）。 */
+export function readScreenAutoState(settings) {
+  const petPaths = petDiyPaths(settings);
+  const state = readJsonSafe(path.join(petPaths.dataRoot, SCREEN_STATE_FILE));
+  const toggle = readJsonSafe(path.join(petPaths.dataRoot, SCREEN_AUTO_FILE));
+  const source = state && typeof state === 'object' && !Array.isArray(state) ? state : {};
+  const toggleSource = toggle && typeof toggle === 'object' && !Array.isArray(toggle) ? toggle : {};
+  const finite = (value) => (Number.isFinite(Number(value)) ? Number(value) : null);
+  return {
+    enabled: typeof source.enabled === 'boolean'
+      ? source.enabled
+      : (toggleSource.enabled === true),
+    lastLookAt: finite(source.lastLookAt),
+    lastSpokenAt: finite(source.lastSpokenAt),
+    lastCaption: typeof source.lastCaption === 'string' ? source.lastCaption : '',
+    lastSpoken: typeof source.lastSpoken === 'string' ? source.lastSpoken : '',
+    totalLooks: finite(source.totalLooks) ?? 0,
+    totalSpoken: finite(source.totalSpoken) ?? 0,
+    lastError: typeof source.lastError === 'string' ? source.lastError : '',
+  };
+}
+
+/** 原子写开关文件（确保 cooPetDataRoot 存在）。 */
+export function writeScreenAutoToggle(settings, enabled) {
+  const petPaths = petDiyPaths(settings);
+  mkdirSync(petPaths.dataRoot, { recursive: true });
+  const file = path.join(petPaths.dataRoot, SCREEN_AUTO_FILE);
+  const temporary = `${file}.tmp-${process.pid}-${Date.now()}`;
+  const value = { enabled: enabled === true, updatedAt: new Date().toISOString() };
+  writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+  renameSync(temporary, file);
+  return { file, value };
+}
+
+/** POST /whale-panel/pet-plugins/screen-auto：{enabled:boolean} → 写开关文件。 */
+async function handleScreenAutoToggle(req, res, settings) {
+  let body;
+  try {
+    body = await readJsonBody(req, settings.maxBodyBytes);
+  } catch (error) {
+    const status = error && error.code === 'payload-too-large' ? 413 : 400;
+    return sendJson(res, status, { ok: false, error: { code: 'bad-request', message: '读取请求体失败' } });
+  }
+  if (!body || typeof body !== 'object' || Array.isArray(body) || typeof body.enabled !== 'boolean') {
+    return sendJson(res, 400, { ok: false, error: { code: 'bad-request', message: 'body 需要 {enabled:boolean}' } });
+  }
+  try {
+    const written = writeScreenAutoToggle(settings, body.enabled);
+    return sendJson(res, 200, {
+      ok: true,
+      enabled: written.value.enabled,
+      updatedAt: written.value.updatedAt,
+      file: written.file,
+      note: written.value.enabled
+        ? '已开启自动看屏幕；桌宠插件会在满足间隔/限流条件时自己看并决定说不说。'
+        : '已关闭自动看屏幕。',
+    });
+  } catch (error) {
+    return sendJson(res, 500, { ok: false, error: { code: 'write-failed', message: error instanceof Error ? error.message : String(error) } });
+  }
+}
+
 // ───────────────────────────── 本机视觉模型 / 看屏幕（T35） ─────────────────────────────
 // 只访问配置的回环 Ollama；截图只写本机 coo-pet-data/screenshots，不外发、不执行第三方代码。
 
@@ -1793,6 +1867,7 @@ async function handlePetPluginsGet(res, settings, deps = {}, visionProbeCache = 
     },
     screen: {
       ...(await probeVision(settings, deps, visionProbeCache)),
+      auto: readScreenAutoState(settings),
       requires: 'vision-model',
     },
     note: '这些是本机桌宠（远程 DSH 人格）的原生插件，不是 Coopanion 扩展；保留远程人格、记忆与 QQ 同一身份。',

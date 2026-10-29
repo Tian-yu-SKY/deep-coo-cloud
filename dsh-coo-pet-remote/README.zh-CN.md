@@ -9,6 +9,9 @@
 > v1.1 起 `pet_status` 会显示 bridge 的心情（`GET /mood`）、气泡动作跟着心情微调；
 > v1.2 起支持**多形象包**（内置 coo/whale + 用户/Workshop pack）与
 > `dataDir/pet-settings.json` 的 **DIY 设置**（外观各轴/大小/气泡/主题…，改文件 ~1s 热生效）。
+> v0.4.6 起她还会**自己看屏幕**（面板开关打开时）：本机截图（只存 `<dataDir>/screenshots`）、
+> 用本机回环 Ollama 视觉模型生成文字描述，再由**同一个远程人格**决定要不要说一句（`[沉默]` = 不打扰）。
+> 只把文字 caption 发给远程大脑，图片不离开本机。
 > v0.4.3 起换装页 `/dress` 地板上的 6 个装饰图标变成真按钮（面板/形象包目录/项目主页/邮箱/音效/聊天面板，
 > 只走白名单 `POST /api/dock`）。
 > 安装见 [INSTALL.md](INSTALL.md)；原理/限制见 [REMOTE-BRAIN.md](REMOTE-BRAIN.md)；
