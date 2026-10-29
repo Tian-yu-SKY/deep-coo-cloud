@@ -330,7 +330,16 @@ window.__ModuleLoader__.load({
       'set.pet.requiresT22': '需要 coo-fork 桌宠插件 0.4.0+ 才会热应用；保存后约 1s 生效，无需重启。',
       'set.pet.currentFallback': '当前生效读取失败',
       'tab.market': 'Coo 市场',
-      'mkt.note': '这些是 Coo/Coopanion 的扩展（Cortico 市场），由 Coopanion 安装并运行；本插件只做浏览/下载/指引，不执行扩展代码。第三方包请自行判断安全。',
+      'mkt.note': 'Coo 市场包是 Coopanion 扩展，不能直接运行在本机桌宠；已适配的包下载后可一键应用到本机桌宠（自动看屏幕 / 前台感知），未适配的暂不生效。本插件不执行扩展代码。',
+      'mkt.nativeBadge': '已适配本机桌宠',
+      'mkt.unsupportedBadge': '暂未适配',
+      'mkt.applyToPet': '应用到本机桌宠',
+      'mkt.applyAgain': '重新应用',
+      'mkt.applying': '应用中…',
+      'mkt.appliedBadge': '已应用',
+      'mkt.unsupportedReason': '该包是 Coopanion 扩展，本机桌宠暂未适配（需要原生适配）。',
+      'mkt.downloadFirst': '先下载，再应用到本机桌宠。',
+      'mkt.applyFailed': '应用失败',
       'mkt.download': '下载',
       'mkt.downloading': '下载中…',
       'mkt.downloadAgain': '重新下载',
@@ -649,7 +658,16 @@ window.__ModuleLoader__.load({
       'set.pet.requiresT22': 'Requires coo-fork pet plugin 0.4.0+ to hot-apply; changes take effect within ~1s, no restart needed.',
       'set.pet.currentFallback': 'Failed to read current pet settings',
       'tab.market': 'Coo Market',
-      'mkt.note': 'These are Coo/Coopanion extensions (Cortico market), installed and run by Coopanion; this plugin only browses/downloads/guides and never executes extension code. Judge third-party package safety yourself.',
+      'mkt.note': 'Coo market packages are Coopanion extensions and cannot run directly in the local pet; adapted packages can be applied to the local pet after download (auto screen look / foreground awareness), others have no effect yet. This plugin never executes extension code.',
+      'mkt.nativeBadge': 'Adapted for local pet',
+      'mkt.unsupportedBadge': 'Not adapted',
+      'mkt.applyToPet': 'Apply to local pet',
+      'mkt.applyAgain': 'Apply again',
+      'mkt.applying': 'Applying…',
+      'mkt.appliedBadge': 'Applied',
+      'mkt.unsupportedReason': 'This Coopanion extension has no native adaptation for the local pet yet.',
+      'mkt.downloadFirst': 'Download first, then apply to the local pet.',
+      'mkt.applyFailed': 'Apply failed',
       'mkt.download': 'Download',
       'mkt.downloading': 'Downloading…',
       'mkt.downloadAgain': 'Re-download',
@@ -1386,11 +1404,6 @@ window.__ModuleLoader__.load({
       const [screenAutoBusy, setScreenAutoBusy] = useState(false);
       const [screenResult, setScreenResult] = useState(null);
       const [screenError, setScreenError] = useState('');
-      const [cooPlugins, setCooPlugins] = useState(null);
-      const [cooError, setCooError] = useState('');
-      const [cooNotice, setCooNotice] = useState('');
-      const [cooBusy, setCooBusy] = useState('');
-      const [cooConfirm, setCooConfirm] = useState(null);
       const aliveRef = useRef(false);
       const tRef = useRef(t);
       tRef.current = t;
@@ -1466,19 +1479,6 @@ window.__ModuleLoader__.load({
         }
       };
 
-      /** T33：拉 Coo 插件列表（下载/已装/主程序状态）。 */
-      const loadCooPlugins = useCallback(async () => {
-        const result = await fetchJson(api('coo-plugins'), { timeoutMs: 15_000 });
-        if (!aliveRef.current) return null;
-        if (result.ok && result.data && result.data.ok === true) {
-          setCooPlugins(result.data);
-          setCooError('');
-          return result.data;
-        }
-        setCooError(`${tRef.current('cc.coo.err')}：${readableReason(result, tRef.current)}`);
-        return null;
-      }, []);
-
       // 只在「总控台」Tab 激活时刷新（切走就停定时器，省资源；T21）
       useEffect(() => {
         if (!active) return undefined;
@@ -1487,13 +1487,11 @@ window.__ModuleLoader__.load({
         load().finally(() => {
           if (mounted && aliveRef.current) setLoading(false);
         });
-        loadCooPlugins();
         loadPetPlugins();
         const interval = Number(settings.refreshIntervalMs) || CONTROL_REFRESH_MS;
         const timer = setInterval(() => {
           if (aliveRef.current) {
             load();
-            loadCooPlugins();
             loadPetPlugins();
           }
         }, interval);
@@ -1509,70 +1507,10 @@ window.__ModuleLoader__.load({
         load().finally(() => {
           if (aliveRef.current) setLoading(false);
         });
-        loadCooPlugins();
         loadPetPlugins();
       };
 
-      /** T33：执行一个 Coo 插件动作（install/uninstall/run/restart）。 */
-      const executeCooAction = async (action, name) => {
-        if (cooBusy !== '') return;
-        setCooBusy(`${action}:${name}`);
-        setCooError('');
-        setCooNotice('');
-        try {
-          const body = { name };
-          if (action === 'install' || action === 'uninstall' || action === 'restart') body.confirm = true;
-          const result = await fetchJson(api(`coo-plugins/${action}`), {
-            method: 'POST',
-            body,
-            timeoutMs: action === 'install' || action === 'uninstall' ? 320_000 : 25_000,
-          });
-          if (!aliveRef.current) return;
-          if (result.ok && result.data && result.data.ok === true) {
-            setCooNotice(result.data.message || tRef.current('cc.coo.actionDone').replace('{action}', action));
-            const refreshed = await loadCooPlugins();
-            if (action === 'install' && refreshed && refreshed.coo && refreshed.coo.running === false) {
-              const runResult = await fetchJson(api('coo-plugins/run'), { method: 'POST', body: { name }, timeoutMs: 25_000 });
-              if (aliveRef.current) {
-                if (runResult.ok && runResult.data && runResult.data.ok === true) setCooNotice(tRef.current('cc.coo.installedAndRunning'));
-                else if (runResult.status === 409) setCooNotice(tRef.current('cc.coo.needRestart'));
-                else setCooError(readableReason(runResult, tRef.current));
-                await loadCooPlugins();
-              }
-            }
-          } else if (result.status === 409 && result.data && result.data.needRestart) {
-            setCooNotice(tRef.current('cc.coo.needRestart'));
-            await loadCooPlugins();
-          } else if (result.status === 409 && result.data && result.data.needInstall) {
-            setCooError(tRef.current('cc.coo.needInstall'));
-          } else {
-            setCooError(readableReason(result, tRef.current));
-          }
-        } finally {
-          if (aliveRef.current) setCooBusy('');
-        }
-      };
-
-      const requestCooAction = (action, name) => {
-        setCooNotice('');
-        setCooError('');
-        setCooConfirm({ action, name });
-      };
-
-      const confirmCooAction = async () => {
-        const next = cooConfirm;
-        setCooConfirm(null);
-        if (next) await executeCooAction(next.action, next.name);
-      };
-
-      const openCooDir = async (which) => {
-        setCooNotice('');
-        const result = await fetchJson(api('coo-plugins/open-dir'), { method: 'POST', body: { which }, timeoutMs: 5_000 });
-        if (!aliveRef.current) return;
-        if (result.ok && result.data && result.data.ok === true) setCooNotice(result.data.path);
-        else setCooError(readableReason(result, tRef.current));
-      };
-
+      /** 暂停/恢复情境观察（沿用 /control-center/pause-context）。 */
       const togglePause = async () => {
         if (pauseBusy) return;
         const next = !(statusRef.current && statusRef.current.paused && statusRef.current.paused.paused === true);
@@ -1727,76 +1665,6 @@ window.__ModuleLoader__.load({
                 h('div', { className: 'set-note' }, t('cc.pet.screen.privacy')))
               : null,
             h('div', { className: 'set-note' }, t('cc.pet.footer'))),
-          // ── T33：Coopanion 扩展（默认折叠，弱化；只影响 Coo 主程序）──
-          h('details', { className: 'cc-section cc-coo-details', 'data-coo-plugins': '1' },
-            h('summary', { className: 'cc-coo-summary' }, t('cc.coo.title2')),
-            h('div', { className: 'cc-section-head' },
-              h('span', { className: 'cc-section-title' }, t('cc.coo.statusHeading')),
-              h('span', { className: 'cc-section-meta' },
-                cooPlugins && cooPlugins.coo
-                  ? (cooPlugins.coo.running
-                    ? t('cc.coo.running').replace('{pid}', (cooPlugins.coo.pids || []).join(','))
-                    : t('cc.coo.stopped'))
-                  : t('cc.loading'))),
-            h('div', { className: 'cc-actions' },
-              h('button', { type: 'button', className: 'wp-btn', onClick: () => { loadCooPlugins(); }, disabled: cooBusy !== '' }, t('cc.refresh')),
-              h('button', { type: 'button', className: 'wp-btn', onClick: () => openCooDir('extensions') }, t('cc.coo.openExtensions')),
-              h('button', { type: 'button', className: 'wp-btn', onClick: () => openCooDir('downloads') }, t('cc.coo.openDownloads'))),
-            cooPlugins && cooPlugins.warning
-              ? h('div', { className: 'set-note set-note-warn' }, cooPlugins.warning)
-              : null,
-            cooError !== '' ? h('div', { className: 'set-note set-note-error' }, cooError) : null,
-            cooNotice !== '' ? h('div', { className: 'set-note' }, cooNotice) : null,
-            h('div', { className: 'set-note' }, t('cc.coo.safety')),
-            (() => {
-              const rows = buildCooPluginRows(cooPlugins);
-              const running = !!(cooPlugins && cooPlugins.coo && cooPlugins.coo.running);
-              if (rows.length === 0) {
-                return h('div', { className: 'cc-empty' },
-                  h('div', {}, t('cc.coo.empty')),
-                  switchTab !== null
-                    ? h('button', { type: 'button', className: 'wp-btn', onClick: () => switchTab('market') }, t('cc.coo.gotoMarket'))
-                    : null);
-              }
-              return h('div', { className: 'cc-coo-rows' }, rows.map((row) => h('div', { className: 'cc-coo-row', key: row.name, 'data-installed': row.installed ? 'yes' : 'no' },
-                h('div', { className: 'cc-coo-main' },
-                  h('span', { className: 'cc-coo-name' }, row.displayName, h('span', { className: 'cc-coo-pkg' }, row.name)),
-                  h('span', { className: 'cc-badge', 'data-kind': row.kind }, cooPluginKindLabel(row.kind, t)),
-                  row.version !== '' ? h('span', { className: 'cc-chip' }, `v${row.version}`) : null,
-                  row.installed ? h('span', { className: 'cc-chip', 'data-installed': 'yes' }, t('cc.coo.installed')) : null,
-                  row.downloaded && !row.installed ? h('span', { className: 'cc-chip' }, t('cc.coo.downloaded')) : null),
-                h('div', { className: 'cc-actions' },
-                  !row.installed && row.downloaded
-                    ? h('button', { type: 'button', className: 'wp-btn wp-btn-primary', disabled: cooBusy !== '', onClick: () => requestCooAction('install', row.name) }, t('cc.coo.addAndRun'))
-                    : null,
-                  row.installed
-                    ? h('button', {
-                      type: 'button',
-                      className: 'wp-btn wp-btn-primary',
-                      disabled: cooBusy !== '',
-                      onClick: () => requestCooAction(running ? 'restart' : 'run', row.name),
-                    }, running ? t('cc.coo.restartAndRun') : t('cc.coo.run'))
-                    : null,
-                  row.installed
-                    ? h('button', { type: 'button', className: 'wp-btn', disabled: cooBusy !== '', onClick: () => requestCooAction('uninstall', row.name) }, t('cc.coo.uninstall'))
-                    : null,
-                  h('button', { type: 'button', className: 'wp-btn', onClick: () => openCooDir(row.installed ? 'extensions' : 'downloads') }, t('cc.coo.openDir'))),
-                cooBusy === `install:${row.name}` || cooBusy === `uninstall:${row.name}` || cooBusy === `run:${row.name}` || cooBusy === `restart:${row.name}`
-                  ? h('div', { className: 'set-note' }, t('cc.coo.busy'))
-                  : null,
-                cooConfirm && cooConfirm.name === row.name
-                  ? h('div', { className: 'cc-coo-confirm' },
-                    h('div', { className: 'set-note set-note-warn' },
-                      cooConfirm.action === 'install' ? t('cc.coo.confirmInstall').replace('{name}', row.name)
-                        : cooConfirm.action === 'uninstall' ? t('cc.coo.confirmUninstall').replace('{name}', row.name)
-                          : cooConfirm.action === 'restart' ? t('cc.coo.confirmRestart')
-                            : t('cc.coo.confirmRun'),
-                      ' ', t('cc.coo.safety')),
-                    h('div', { className: 'cc-actions' },
-                      h('button', { type: 'button', className: 'wp-btn wp-btn-primary', disabled: cooBusy !== '', onClick: confirmCooAction }, t('cc.coo.confirm')),
-                      h('button', { type: 'button', className: 'wp-btn', disabled: cooBusy !== '', onClick: () => setCooConfirm(null) }, t('cc.coo.cancel'))))
-                  : null)));
-            })()),
           h('div', { className: 'cc-section', style: settings.sections.context ? undefined : { display: 'none' } },
             h('div', { className: 'cc-section-head' },
               h('span', { className: 'cc-section-title' }, t('cc.section.context')),
@@ -2123,11 +1991,14 @@ window.__ModuleLoader__.load({
 
     /** 市场列表一行（点击展开详情；行内可下载/安装）。 */
     function CooMarketRow(props) {
-      const { item, open, t, onToggle, onCopy, onDownload, downloading, onInstall, installing, installConfirm, onInstallConfirm, onInstallCancel } = props;
+      const { item, open, t, onToggle, onCopy, onDownload, downloading, onApply, applying } = props;
       const links = marketLinks(item);
       const keywords = Array.isArray(item.keywords) ? item.keywords.slice(0, 12) : [];
       const downloaded = item.downloaded === true;
-      return h('div', { className: 'mkt-row', 'data-open': open ? '1' : 'false', 'data-kind': item.kind },
+      const native = item.native && typeof item.native === 'object' ? item.native : null;
+      const supported = !!(native && native.supported === true);
+      const applied = !!(native && native.applied === true);
+      return h('div', { className: 'mkt-row', 'data-open': open ? '1' : 'false', 'data-kind': item.kind, 'data-native': supported ? 'yes' : 'no' },
         h('div', {
           className: 'mkt-summary',
           role: 'button',
@@ -2141,12 +2012,12 @@ window.__ModuleLoader__.load({
           h('span', { className: 'mkt-name' }, item.name),
           h('span', { className: 'mkt-version' }, item.version ? `v${item.version}` : ''),
           h('span', { className: 'mkt-kind', 'data-kind': item.kind }, marketKindLabel(item.kind, t)),
-          item.installed
-            ? h('span', { className: 'mkt-badge', 'data-installed': 'yes' }, `${t('mkt.installed')}${item.installedVersion ? ` · v${item.installedVersion}` : ''}`)
-            : h('span', { className: 'mkt-badge' }, t('mkt.notInstalled')),
           downloaded
             ? h('span', { className: 'mkt-badge', 'data-downloaded': 'yes' }, `${t('mkt.downloaded')}${item.downloadedVersion ? ` v${item.downloadedVersion}` : ''}`)
             : null,
+          supported
+            ? h('span', { className: 'mkt-badge', 'data-native': 'yes' }, applied ? t('mkt.appliedBadge') : t('mkt.nativeBadge'))
+            : (downloaded ? h('span', { className: 'mkt-badge', 'data-native': 'no' }, t('mkt.unsupportedBadge')) : null),
           h('span', { className: 'mkt-downloads' }, `↓ ${formatDownloads(item.downloadsMonthly)}/${t('mkt.downloads')}`)),
         h('span', { className: 'mkt-desc' }, item.description || '—')),
         h('button', {
@@ -2174,7 +2045,7 @@ window.__ModuleLoader__.load({
             h('div', { className: 'set-actions' },
               h('button', {
                 type: 'button',
-                className: 'wp-btn wp-btn-primary',
+                className: 'wp-btn',
                 disabled: downloading,
                 onClick: (event) => { event.stopPropagation(); if (!downloading && typeof onDownload === 'function') onDownload(item.name); },
               }, downloading ? t('mkt.downloading') : t('mkt.download')),
@@ -2183,24 +2054,23 @@ window.__ModuleLoader__.load({
                 className: 'wp-btn',
                 onClick: (event) => { event.stopPropagation(); if (typeof onCopy === 'function') onCopy(item.name); },
               }, t('mkt.copy')),
-              h('button', {
-                type: 'button',
-                className: 'wp-btn',
-                disabled: installing || !downloaded,
-                onClick: (event) => {
-                  event.stopPropagation();
-                  if (typeof onInstall === 'function') onInstall(downloaded ? item.name : null);
-                },
-              }, installing ? t('mkt.installing') : t('mkt.installToCoop'))),
-            !downloaded ? h('div', { className: 'set-note' }, t('mkt.installNeedDownload')) : null,
-            installConfirm === item.name
-              ? h('div', { className: 'set-note set-note-warn' },
-                h('div', {}, t('mkt.installWarning')),
-                h('div', { className: 'set-actions' },
-                  h('button', { type: 'button', className: 'wp-btn wp-btn-primary', disabled: installing, onClick: (event) => { event.stopPropagation(); if (typeof onInstallConfirm === 'function') onInstallConfirm(item.name); } }, t('mkt.installConfirm')),
-                  h('button', { type: 'button', className: 'wp-btn', disabled: installing, onClick: (event) => { event.stopPropagation(); if (typeof onInstallCancel === 'function') onInstallCancel(); } }, t('mkt.installCancel'))))
+              downloaded && supported
+                ? h('button', {
+                  type: 'button',
+                  className: 'wp-btn wp-btn-primary',
+                  disabled: applying === true,
+                  onClick: (event) => { event.stopPropagation(); if (!applying && typeof onApply === 'function') onApply(item.name); },
+                }, applying ? t('mkt.applying') : (applied ? t('mkt.applyAgain') : t('mkt.applyToPet')))
+                : null),
+            downloaded && supported
+              ? h('div', { className: 'set-note' }, native && native.appliedHint ? String(native.appliedHint) : '')
               : null,
-            h('div', { className: 'set-note' }, t('mkt.installHint').replace('{pkg}', item.name)))
+            downloaded && !supported
+              ? h('div', { className: 'set-note set-note-warn' }, t('mkt.unsupportedReason'))
+              : null,
+            !downloaded
+              ? h('div', { className: 'set-note' }, t('mkt.downloadFirst'))
+              : null)
           : null);
     }
 
@@ -2217,8 +2087,7 @@ window.__ModuleLoader__.load({
       const [onlyDownloaded, setOnlyDownloaded] = useState(false);
       const [expanded, setExpanded] = useState('');
       const [downloading, setDownloading] = useState([]);
-      const [installing, setInstalling] = useState(false);
-      const [installConfirm, setInstallConfirm] = useState('');
+      const [applying, setApplying] = useState('');
       const aliveRef = useRef(false);
       const tRef = useRef(t);
       tRef.current = t;
@@ -2248,8 +2117,8 @@ window.__ModuleLoader__.load({
       const downloadedNames = new Set((data && Array.isArray(data.downloaded) ? data.downloaded : []).map((entry) => entry.name));
       const withFlags = items.map((item) => ({ ...item, downloaded: item.downloaded === true || downloadedNames.has(item.name) }));
       const visible = sortCooMarketItems(filterCooMarketItems(withFlags, query, kind, onlyDownloaded), sort);
-      const installedCount = data && Array.isArray(data.installed) ? data.installed.length : 0;
       const downloadedCount = (data && Array.isArray(data.downloaded) ? data.downloaded.length : 0);
+      const supportedCount = items.filter((item) => item.native && item.native.supported === true).length;
       const stale = !!(data && data.ok === false && data.cached === true && items.length > 0);
       const downloadsDir = data && typeof data.downloadsDir === 'string' ? data.downloadsDir : '';
 
@@ -2277,7 +2146,6 @@ window.__ModuleLoader__.load({
           if (result.ok && result.data && result.data.ok === true) {
             const dataOut = result.data;
             setNotice(tRef.current('mkt.downloadNotice').replace('<name>', dataOut.name));
-            setInstallConfirm('');
             await load();
           } else {
             setError(`${tRef.current('mkt.downloadFailed')}：${readableReason(result, tRef.current)}`);
@@ -2295,33 +2163,23 @@ window.__ModuleLoader__.load({
         else setError(readableReason(result, tRef.current));
       };
 
-      const requestInstall = (name) => {
-        if (typeof name !== 'string') return;
-        setNotice('');
-        setInstallConfirm(name);
-      };
-
-      const confirmInstall = async (name) => {
-        if (installing) return;
-        setInstalling(true);
+      /** T38：把已下载且已适配的包应用到本机桌宠（幂等；不装 Coo 主程序）。 */
+      const applyNative = async (name) => {
+        if (typeof name !== 'string' || applying !== '') return;
+        setApplying(name);
         setNotice('');
         setError('');
         try {
-          const result = await fetchJson(api('coo-market/install'), {
-            method: 'POST',
-            body: { name, confirm: true },
-            timeoutMs: 320_000,
-          });
+          const result = await fetchJson(api('coo-market/apply'), { method: 'POST', body: { name }, timeoutMs: 20_000 });
           if (!aliveRef.current) return;
           if (result.ok && result.data && result.data.ok === true) {
-            setNotice(tRef.current('mkt.installedNotice'));
-            setInstallConfirm('');
+            setNotice(result.data.message || tRef.current('mkt.applyToPet'));
             await load();
           } else {
-            setError(`${tRef.current('mkt.installFailed')}：${readableReason(result, tRef.current)}`);
+            setError(`${tRef.current('mkt.applyFailed')}：${readableReason(result, tRef.current)}`);
           }
         } finally {
-          if (aliveRef.current) setInstalling(false);
+          if (aliveRef.current) setApplying('');
         }
       };
 
@@ -2334,7 +2192,7 @@ window.__ModuleLoader__.load({
               h('span', { className: 'wp-chip' }, loading
                 ? t('mkt.loading')
                 : t('mkt.count').replace('{n}', String(visible.length))),
-              installedCount > 0 ? h('span', { className: 'wp-chip' }, `${t('mkt.installed')} ${installedCount}`) : null,
+              supportedCount > 0 ? h('span', { className: 'wp-chip', 'data-native-count': '1' }, `${t('mkt.nativeBadge')} ${supportedCount}`) : null,
               downloadedCount > 0 ? h('span', { className: 'wp-chip', 'data-downloaded-count': '1' }, `${t('mkt.downloaded')} ${downloadedCount}`) : null,
               stale ? h('span', { className: 'wp-chip' }, t('mkt.stale')) : null,
               data && data.updatedAt
@@ -2381,11 +2239,8 @@ window.__ModuleLoader__.load({
                 onCopy: copyName,
                 onDownload: download,
                 downloading: downloading.includes(item.name),
-                onInstall: requestInstall,
-                installing: installing && installConfirm === item.name,
-                installConfirm,
-                onInstallConfirm: confirmInstall,
-                onInstallCancel: () => setInstallConfirm(''),
+                onApply: applyNative,
+                applying: applying === item.name,
               }))));
     }
 

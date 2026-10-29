@@ -1,8 +1,8 @@
 {
   "name": "deep-coo-cloud",
-  "version": "2.5.0",
+  "version": "2.6.0",
   "private": true,
-  "description": "deep-coo-cloud：Coo 桌宠 × 云端 DSH 人格控制台（本机 DSH Web UI：聊天/总控台/设置/Coo 市场/桌宠 DIY）。总控台含「本机桌宠插件」：前台感知/跨端接话/DIY/看屏幕（本机 Ollama），看屏幕支持自动开关与状态（配合 T36 桌宠插件）；Coopanion 扩展折叠区。",
+  "description": "deep-coo-cloud：Coo 桌宠 × 云端 DSH 人格控制台（本机 DSH Web UI：聊天/总控台/设置/Coo 市场/桌宠 DIY）。总控台含「本机桌宠插件」（前台感知/跨端接话/DIY/看屏幕/自动看屏幕）；Coo 市场已适配包可一键应用到本机桌宠（不装 Coo 主程序、不执行扩展代码）。",
   "type": "module",
   "main": "index.js",
   "exports": {

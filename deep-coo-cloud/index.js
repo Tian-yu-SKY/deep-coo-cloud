@@ -635,6 +635,11 @@ export function createRouteHandler(settings, deps = {}) {
         if (method !== 'POST') return methodNotAllowed(res, 'POST');
         return await handleCooMarketOpenDir(res, effective, deps);
       }
+      // ── T38：Coo 市场包 → 本机桌宠原生适配（只改本机开关/恢复 observer，不装 Coo 主程序）──
+      if (path === `${ROUTE_PREFIX}/coo-market/apply`) {
+        if (method !== 'POST') return methodNotAllowed(res, 'POST');
+        return await handleCooMarketApply(req, res, effective, deps);
+      }
       // ── T33：Coo 插件列表 / 安装 / 卸载 / 运行 / 重启（主程序重启才加载新扩展；绝不杀 pet-host）──
       if (path === `${ROUTE_PREFIX}/coo-plugins`) {
         if (method !== 'GET') return methodNotAllowed(res, 'GET');
@@ -2691,8 +2696,44 @@ async function fetchCooMarketItems(settings, deps) {
   return items;
 }
 
+/** T38：Coo 市场包 → 本机桌宠原生适配注册表（首版两个；其余 unsupported）。 */
+export const COO_MARKET_NATIVE_ADAPTERS = Object.freeze({
+  'cortico-world-screen-look': Object.freeze({
+    adapter: 'screen',
+    label: '自动看屏幕',
+    appliedHint: '开启本机桌宠自动看屏幕（T36 负责节奏与是否说话）',
+  }),
+  'cortico-world-gaming-alont1': Object.freeze({
+    adapter: 'foreground',
+    label: '前台感知 / 游戏陪玩',
+    appliedHint: '恢复本机桌宠前台感知（若被暂停）',
+  }),
+});
+
+/** 未适配包的统一说明。 */
+export const COO_MARKET_UNSUPPORTED_REASON = '该包是 Coopanion 扩展，本机桌宠暂未适配（需要原生适配）';
+
+/** 查一个包是否有本机桌宠原生适配。 */
+export function resolveCooMarketNative(name) {
+  const entry = typeof name === 'string' && Object.prototype.hasOwnProperty.call(COO_MARKET_NATIVE_ADAPTERS, name)
+    ? COO_MARKET_NATIVE_ADAPTERS[name]
+    : null;
+  if (!entry) {
+    return { supported: false, adapter: null, label: '', appliedHint: '', reason: COO_MARKET_UNSUPPORTED_REASON };
+  }
+  return { supported: true, adapter: entry.adapter, label: entry.label, appliedHint: entry.appliedHint, reason: '' };
+}
+
+/** 推断某适配当前是否已应用（screen → autolook enabled；foreground → observer 未暂停）。 */
+function cooMarketNativeApplied(settings, native) {
+  if (!native || native.supported !== true) return false;
+  if (native.adapter === 'screen') return readScreenAutoState(settings).enabled === true;
+  if (native.adapter === 'foreground') return collectControlComponents(settings, Date.now()).observer.paused !== true;
+  return false;
+}
+
 /**
- * `GET /whale-panel/coo-market`：npm 搜索（缓存 10min）+ 本机已安装扩展映射。
+ * `GET /whale-panel/coo-market`：npm 搜索（缓存 10min）+ 本机已安装扩展映射 + 原生适配标记。
  * 失败不崩：有缓存回 ok:false + cached:true + 旧数据；无缓存回 ok:false + 空列表。
  */
 async function handleCooMarketGet(res, settings, deps, cache) {
@@ -2722,8 +2763,10 @@ async function handleCooMarketGet(res, settings, deps, cache) {
 
   const items = (cache.items ?? []).map((item) => {
     const downloaded = downloadedByName.get(item.name) ?? null;
+    const native = resolveCooMarketNative(item.name);
     return {
       ...item,
+      native: { ...native, applied: cooMarketNativeApplied(settings, native) },
       installed: installedNames.has(item.name),
       installedVersion: installedScan.installed.find((entry) => entry.name === item.name)?.version ?? null,
       downloaded: downloaded !== null,
@@ -2749,7 +2792,7 @@ async function handleCooMarketGet(res, settings, deps, cache) {
     cooRoot: cooPaths.root,
     kindCounts,
     source: settings.cooMarketUrl,
-    note: '这些扩展由 Coo/Coopanion（Cortico Core）安装并运行；本插件只做浏览/指引，不安装、不执行。',
+    note: '这些是 Coo/Coopanion 的扩展包，不能直接运行在本机桌宠；已适配包下载后可一键应用到本机桌宠（自动看屏幕/前台感知），未适配的暂不生效。',
   });
 }
 
@@ -3094,6 +3137,73 @@ async function handleCooMarketInstall(req, res, settings, deps) {
         message: error instanceof Error ? error.message : String(error),
         hint: '可到 Coopanion 设置 → 扩展 手动安装；或检查 config cooPnpmPath/cooExtensionsDir。',
       },
+    });
+  }
+}
+
+/** POST /whale-panel/coo-market/apply：把已下载且已适配的包应用到本机桌宠（幂等、不装 Coo 主程序）。 */
+async function handleCooMarketApply(req, res, settings, deps) {
+  let body;
+  try {
+    body = readJsonBodySafe(await readJsonBody(req, settings.maxBodyBytes));
+  } catch (error) {
+    const status = error && error.code === 'payload-too-large' ? 413 : 400;
+    return sendJson(res, status, { ok: false, error: { code: 'bad-request', message: '读取请求体失败' } });
+  }
+  const validated = validatePackageName(body && body.name);
+  if (!validated.ok) {
+    return sendJson(res, 400, { ok: false, error: { code: 'invalid-name', message: validated.error } });
+  }
+  const name = validated.name;
+  const cooPaths = resolveCooPaths(settings);
+  const downloaded = scanDownloadedExtensions(cooPaths.downloadsDir).downloaded.find((entry) => entry.name === name);
+  if (!downloaded) {
+    return sendJson(res, 404, {
+      ok: false,
+      error: { code: 'not-downloaded', message: `本机还没有下载 ${name}（先在 Coo 市场下载）` },
+    });
+  }
+  const native = resolveCooMarketNative(name);
+  if (!native.supported) {
+    return sendJson(res, 400, {
+      ok: false,
+      error: { code: 'not-supported', message: native.reason },
+      native: { ...native, applied: false },
+    });
+  }
+  try {
+    if (native.adapter === 'screen') {
+      const wasEnabled = readScreenAutoState(settings).enabled === true;
+      const written = writeScreenAutoToggle(settings, true);
+      return sendJson(res, 200, {
+        ok: true,
+        applied: true,
+        alreadyApplied: wasEnabled,
+        adapter: 'screen',
+        label: native.label,
+        message: wasEnabled ? '已应用：自动看屏幕（原本已开启）' : '已应用：自动看屏幕',
+        file: written.file,
+        native: { ...native, applied: true },
+      });
+    }
+    if (native.adapter === 'foreground') {
+      const paused = existsSync(contextPausedFile(settings));
+      if (paused) setContextPaused(settings, false);
+      return sendJson(res, 200, {
+        ok: true,
+        applied: true,
+        alreadyApplied: !paused,
+        adapter: 'foreground',
+        label: native.label,
+        message: paused ? '已应用：前台感知/游戏陪玩（已恢复情境观察）' : '已应用：前台感知/游戏陪玩（本来就在运行）',
+        native: { ...native, applied: true },
+      });
+    }
+    return sendJson(res, 400, { ok: false, error: { code: 'not-supported', message: '未知的原生适配类型' } });
+  } catch (error) {
+    return sendJson(res, 500, {
+      ok: false,
+      error: { code: 'apply-failed', message: error instanceof Error ? error.message : String(error) },
     });
   }
 }

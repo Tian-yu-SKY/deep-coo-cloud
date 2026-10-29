@@ -13,7 +13,7 @@ T24 加「Coo 市场」Tab：浏览 npm 上的 Coo/Coopanion 扩展（Cortico �
 - Host 半：`index.js` —— 在 DSH Web 服务器注册同源路由 `/whale-panel/*`（聊天/设置/服务器 QQ 配置）与 `/control-center/*`（状态聚合/PAUSED，Tab 内复用），代理 bridge HTTP、转发 bridge token、按需 ssh 读写服务器 awareness patch。
 - Client 半：`client.js` —— 注册**一个** `sidebar.panellist`（id=`whale-chat`、label=「鲸歌」、order=5）与一个 `main` keyed 整页 Tab 外壳。
 - 无构建步骤（纯 ESM/CJS 工厂 bundle）；样式只用 DSH 主题 token（`--dsw-alias-*`），跟随明暗主题。
-- 版本：`2.5.0`（T37 自动看屏幕开关/状态，配合 T36 桌宠插件；包名 `deep-coo-cloud`）；离线测试 **151 项**（host / client / manifest / control-center / settings / pet-diy / pet-diy-import / coo-market / coo-market-download / coo-plugins / pet-plugins / vision 十二组）。
+- 版本：`2.6.0`（T38 移除 Coopanion 扩展卡；Coo 市场已适配包一键应用到本机桌宠；包名 `deep-coo-cloud`）；离线测试 **156 项**（host / client / manifest / control-center / settings / pet-diy / pet-diy-import / coo-market / coo-market-native / coo-market-download / coo-plugins / pet-plugins / vision 十三组）。
 - **可分发**：默认配置不含任何本机/服务器私有信息（IP/域名/QQ 号/路径/SSH key/token）；侧栏名称、面板标题、Tab 文案、桥接地址、服务器 SSH、QQ 白名单均可在「设置 → 通用/连接」里配置（保存到 `whale-panel/settings.json`）。
 - 「设置 → 桌宠 DIY」依赖 coo-fork 桌宠插件 **`dsh-coo-pet-remote@0.4.0-remote.1`**（T22）：写 `coo-pet-data/pet-settings.json` 后插件 ~1s 热应用；该插件 config 未覆盖 settingsFile，默认路径与本插件默认一致。
 
@@ -37,7 +37,7 @@ T24 加「Coo 市场」Tab：浏览 npm 上的 Coo/Coopanion 扩展（Cortico �
 | Tab | 内容 |
 | --- | --- |
 | **聊天**（默认） | 原「鲸歌 · 服务器人格」页：历史/实时消息、输入框、连接状态、心情 chip；发送键与气泡字号跟随设置 |
-| **总控台** | 原独立总控台全部内容：状态卡片 ×5（bridge/服务器/QQ桥/桌宠/心情）、情境流（5 条）、QQ 近况（4 行）、组件状态（observer/sync/mirror + 四个 Startup vbs）、操作（刷新 / 暂停恢复情境观察 / 复制诊断 / 切到设置）、**本机桌宠插件**（前台感知/跨端接话/桌宠 DIY/看屏幕状态）、折叠的 Coopanion 扩展管理；**只在激活时每 N 秒刷新**（N 来自设置的刷新间隔，默认 10s） |
+| **总控台** | 原独立总控台全部内容：状态卡片 ×5（bridge/服务器/QQ桥/桌宠/心情）、情境流（5 条）、QQ 近况（4 行）、组件状态（observer/sync/mirror + 四个 Startup vbs）、操作（刷新 / 暂停恢复情境观察 / 复制诊断 / 切到设置）、**本机桌宠插件**（前台感知/跨端接话/桌宠 DIY/看屏幕状态）；**只在激活时每 N 秒刷新**（N 来自设置的刷新间隔，默认 10s） |
 | **设置** | 见下方清单；本地设置即时保存到 `whale-panel/settings.json`，服务器 QQ 配置应用会重启服务器 dsh-web（约 10s） |
 | **Coo 市场**（T24/T25） | 浏览 npm 上 Coo/Coopanion 的 Cortico 扩展（缓存 10min）：搜索/类型筛选/排序/月下载/已安装/已下载状态、详情展开；**一键下载到本机** `coo-extensions/`，可选「安装到 Coopanion（高级，二次确认 + 需重启）」；始终不执行扩展代码 |
 
@@ -105,6 +105,23 @@ Tab 状态记忆在 `localStorage`（key `whale-panel.tab`）；切走 Tab 会�
   - 返回 `{ok,installed:true,needRestart:true,output}`，明确提示 **需重启 Coopanion 才生效**；失败返回可读错误 + 手动安装提示，不改 Coopanion 安装目录（resources/app）。
   - 回滚：在 Coopanion 设置 → 扩展里卸载，或在 extensions 目录执行 `pnpm remove <pkg>` 后重启 Coopanion。
 
+#### 1.3.2 应用到本机桌宠（T38）
+
+市场里的包是 Coopanion 扩展，不能直接运行在本机桌宠；面板提供少量**原生适配**，已下载且已适配的包可一键应用：
+
+| 包 | 适配 | 应用效果 |
+| --- | --- | --- |
+| `cortico-world-screen-look` | `screen` | 写 `<cooPetDataRoot>/screen-autolook.json` `{enabled:true,updatedAt}`（开启 T36 自动看屏幕） |
+| `cortico-world-gaming-alont1` | `foreground` | 若 context-observer 处于 PAUSED 则恢复（删 PAUSED），即前台感知/游戏陪玩 |
+| 其它包 | — | `supported:false`，显示「本机桌宠暂未适配（需要原生适配）」，不生效 |
+
+- `GET /whale-panel/coo-market` 每个 item 增加 `native:{supported,adapter,label,appliedHint,applied,reason}`；
+  `applied` 由 `screen-autolook.json`（screen）或 observer PAUSED 状态（foreground）推断。
+- `POST /whale-panel/coo-market/apply {name}`：只允许**已下载且 supported**；不支持 400、未下载 404；
+  幂等（重复 apply 返回 `alreadyApplied`）；只改本机开关/恢复 observer，**不装 Coo 主程序、不执行包代码**。
+- UI：已下载行主按钮为「**应用到本机桌宠**」（已应用显示「重新应用」+ 徽标）；未适配显示灰色「暂未适配」+原因；
+  保留「下载/重新下载」；**不再提供安装到 Coopanion 的按钮/流程**（后端旧 install 路由保留但无 UI）。
+
 ### 1.4 通用 / 连接（T26，可分发）
 
 设置 Tab 顶部新增「通用 / 连接」区块（保存到 `whale-panel/settings.json`，Host 白名单校验）：
@@ -123,20 +140,11 @@ Tab 状态记忆在 `localStorage`（key `whale-panel.tab`）；切走 Tab 会�
 - Host 所有路由在每次请求时合并 `config + settings.json` 得到 effective 设置（bridge 地址、SSH 主机、QQ 默认、UI 名称）。
 - **隐私**：插件源码/默认配置不含 IP、域名、QQ 号、绝对路径、SSH key、token；`settings.json` 与 `coo-extensions/` 是运行时本机文件，不在分发包内。
 
-### 1.5 总控台「Coo 插件」（T33）
+### 1.5 Coopanion 扩展卡（T38 起已移除 UI）
 
-总控台新增「Coo 插件」卡，把「Coo 市场」下载的扩展加入 Coopanion 并运行：
-
-- **数据**：`GET /whale-panel/coo-plugins` → `coo:{running,pids,petHostPids,root,exe,canLaunch}` + `downloaded[]`（`<dshLinkRoot>/coo-extensions`，读 `package.json.cortico.kind`）+ `installed[]`（`<cooRoot>/data/extensions` 与 node_modules）；进程状态缓存 ~3s（避免频繁 PowerShell）。
-- **主程序判定**：`Coopanion.exe` 且 CommandLine **不含** `--pet-host`/`--type=` 的进程；pet-host/子进程永不杀。
-- **操作**（全部先二次确认，提示「第三方扩展将在 Coopanion 里运行，请自行判断安全」）：
-  - 「加入并运行」= `POST .../install {confirm:true}`（pnpm add）→ Coo 未运行则自动 `POST .../run`，Coo 在跑则提示需重启；
-  - 已安装：`POST .../run {name}`（未装 → 409 `needInstall`；已运行 → 409 `needRestart`；否则 `spawn(Coopanion.exe, {cwd:cooRoot, detached:true})`）；
-  - 「重启并运行」= `POST .../restart {confirm:true}`（只 `taskkill /PID` 主程序，等 ~1.5s 再 spawn；pet-host 不动）；
-  - 「卸载」= `POST .../uninstall {confirm:true}`（pnpm remove，需重启 Coo）；
-  - 「打开安装/下载目录」= `POST .../open-dir {which:'extensions'|'downloads'}`。
-- **Cortico 语义**：安装/卸载后必须重启 Coopanion 主程序才会加载/卸载扩展；本插件只操作 `coo-extensions` 与 `<cooRoot>/data/extensions`，**不执行任何扩展代码**。
-- 空态会提示「先去 Coo 市场下载插件」并可一键切到 Coo 市场 Tab。
+T33 曾在总控台放「Coopanion 扩展」折叠卡（安装/运行/重启 Coo 主程序）；**T38 已按用户要求彻底移除该卡**，
+不再有「加入并运行」「第三方扩展将在 Coopanion 里运行」等入口。后端 `/whale-panel/coo-plugins*` 路由仍保留
+（供将来可能的 CLI/脚本使用），但面板 UI 不再暴露；Coo 市场下载项改为「应用到本机桌宠」的原生适配（见 §1.3.2）。
 
 ### 1.6 总控台「本机桌宠插件」（T34，B 方案）
 
@@ -195,6 +203,7 @@ bridge 的 HTTP 接口（`/health` `/history` `/say` …）**没有 CORS 头**�
   GET  /whale-panel/pet-plugins        ──────▶  本机桌宠原生插件状态（observer/跨端/DIY/看屏幕探测；只读）
   POST /whale-panel/screen-look        ──────▶  截图 1280×720 JPEG → 本机 Ollama 视觉模型 → caption（只发回环）
   POST /whale-panel/pet-plugins/screen-auto ─▶  写 `<coo-pet-data>/screen-autolook.json` {enabled}（T36 读取；原子写）
+  POST /whale-panel/coo-market/apply   ──────▶  已下载+已适配包 → 应用到本机桌宠（screen: 自动看屏幕 / foreground: 恢复观察；幂等）
   GET  /whale-panel/coo-plugins        ──────▶  已下载/已安装 Coo 插件 + Coopanion 主程序状态（缓存 ~3s）
   POST /whale-panel/coo-plugins/install|uninstall  ─▶  pnpm add/remove（confirm；需重启 Coopanion）
   POST /whale-panel/coo-plugins/run|restart        ─▶  spawn Coopanion.exe / 只杀主程序后重启（不杀 pet-host）
@@ -416,6 +425,16 @@ errors: 无
 - T26 新增测试：默认通用值、UI/桥接/SSH/QQ 白名单校验与保存、显式空 SSH → `GET settings` 返回 disabled 且 `apply-awareness` 400 `ssh-disabled`、`GET /config` 下发 ui/sshEnabled/qqDefaults/paths、client `localizeWithUi`/Tab 文案覆盖/设置页「通用 / 连接」渲染。
 - 未实测真实「局域网 bridge」与真实 SSH 应用（默认禁用；需要的用户填 `serverSshHost` 后用）。全部测试离线 mock。
 
+### T38 联调记录（2026-10-29，未安装、未重启本机 DSH）
+
+- 离线测试 **156/156 PASS**，新增 `coo-market-native.test.mjs` 5 项（注册表、GET items.native、apply 的
+  未下载 404/未适配 400/403/405、screen → 写 autolook 并幂等、gaming → 恢复 PAUSED 并幂等）+
+  client 更新（Coo 卡片移除断言、CooMarketRow 原生应用/未适配/未下载按钮、市场 banner 新文案）。
+- 移除总控台 T33 Coopanion 折叠卡（含安装/运行/重启/卸载按钮与安全文案），后端 `/coo-plugins*` 路由保留无 UI。
+- 市场原生适配首版两个：`cortico-world-screen-look`（自动看屏幕）/ `cortico-world-gaming-alont1`（恢复前台感知）；
+  其它包显示「本机桌宠暂未适配（需要原生适配）」，不误导安装。
+- 未 reload DSH、未真实 apply（避免改本机自动看屏幕/PAUSED 状态，留给 Lead 真机验证）。
+
 ### T37 联调记录（2026-10-29，未安装、未重启本机 DSH）
 
 - 离线测试 **151/151 PASS**：新增 pet-plugins 用例（GET screen.auto 默认空/读 `screen-look-state.json` 全字段/
@@ -585,6 +604,9 @@ errors: 无
 43. **Coopanion 扩展卡默认折叠且只影响 Coo 主程序**：不影响本机桌宠/远程人格/QQ；「加入并运行」不再是主操作，需展开后显式确认。
 44. **自动看屏幕开关只写本机开关文件**：实际节奏/间隔/限流/相似度去重/是否说话由 T36 桌宠插件负责；T36 未安装/未 reload 时开关只落盘不生效。
 45. **screen.auto 状态只读 T36 的输出文件**：`screen-look-state.json` 不存在/损坏时显示「还没看过」，不报错；自动看屏幕仍受 T36 自己的暂停（context-observer PAUSED）与 brain busy 约束。
+46. **总控台已移除 Coopanion 扩展卡（T38）**：`/whale-panel/coo-plugins*` 后端路由仍保留但无 UI；不要再从面板安装/运行 Coo 主程序扩展。
+47. **Coo 市场原生适配首版只有两个包**（`cortico-world-screen-look` → 自动看屏幕；`cortico-world-gaming-alont1` → 恢复前台感知）；其它包显示「本机桌宠暂未适配」，下载/应用不会生效，需要后续原生适配。
+48. **apply 只改本机状态**：screen 写 `screen-autolook.json`（T36 读取），foreground 删 `context-observer/PAUSED`；不安装/不执行包代码、不改远程人格/QQ；重复 apply 幂等。
 
 ## 6. 文件
 

@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "deep-coo-cloud",
-    "description": "「deep-coo-cloud」控制台：聊天/总控台/设置/Coo 市场/桌宠 DIY；总控台可手动/自动看屏幕（本机 Ollama，自动看屏幕配合 T36 桌宠插件，截图只存本机），并显示前台感知/跨端接话/DIY 状态。"
+    "description": "「deep-coo-cloud」控制台：聊天/总控台/设置/Coo 市场/桌宠 DIY；总控台含本机桌宠插件（前台感知/跨端接话/DIY/看屏幕/自动看屏幕）；Coo 市场已适配包可一键应用到本机桌宠。"
   }
 }

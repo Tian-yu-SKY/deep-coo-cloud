@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "deep-coo-cloud",
-    "description": "deep-coo-cloud console: Chat / Control Center / Settings / Coo Market / Pet DIY; Control Center supports manual and automatic screen look via local Ollama (auto works with the T36 pet plugin; screenshots stay local) and shows native pet plugin status."
+    "description": "deep-coo-cloud console: Chat / Control Center / Settings / Coo Market / Pet DIY; Control Center shows native pet plugins (foreground/cross-chat/DIY/screen/auto-look); adapted Coo market packages can be applied to the local pet in one click."
   }
 }
