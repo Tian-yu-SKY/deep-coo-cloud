@@ -152,6 +152,33 @@ window.__ModuleLoader__.load({
       'cc.section.qq': 'QQ 近况',
       'cc.section.components': '组件状态',
       'cc.section.actions': '操作',
+      'cc.coo.title': 'Coo 插件',
+      'cc.coo.running': '运行中 · pid {pid}',
+      'cc.coo.stopped': '未运行',
+      'cc.coo.openExtensions': '打开安装目录',
+      'cc.coo.openDownloads': '打开下载目录',
+      'cc.coo.openDir': '目录',
+      'cc.coo.downloaded': '已下载',
+      'cc.coo.installed': '已安装',
+      'cc.coo.addAndRun': '加入并运行',
+      'cc.coo.run': '运行',
+      'cc.coo.restartAndRun': '重启并运行',
+      'cc.coo.uninstall': '卸载',
+      'cc.coo.empty': '还没有从 Coo 市场下载任何插件。',
+      'cc.coo.gotoMarket': '去 Coo 市场',
+      'cc.coo.safety': '第三方扩展将在 Coopanion 里运行，请自行判断安全。',
+      'cc.coo.confirmInstall': '确认把 {name} 加入 Coopanion？（pnpm add；需重启 Coopanion 生效）',
+      'cc.coo.confirmUninstall': '确认从 Coopanion 卸载 {name}？（需重启 Coopanion 生效）',
+      'cc.coo.confirmRestart': '确认重启 Coopanion？会结束当前 Coo 主程序（不影响 pet-host）。',
+      'cc.coo.confirmRun': '确认启动 Coopanion？（已安装扩展会随启动加载）',
+      'cc.coo.actionDone': '已处理：{action}',
+      'cc.coo.needRestart': 'Coo 正在运行；新扩展需重启 Coopanion 后加载（可用「重启并运行」）。',
+      'cc.coo.needInstall': '该插件尚未安装到 Coopanion。',
+      'cc.coo.installedAndRunning': '已加入并启动 Coopanion。',
+      'cc.coo.err': 'Coo 插件列表读取失败',
+      'cc.coo.confirm': '确认',
+      'cc.coo.cancel': '取消',
+      'cc.coo.busy': '处理中…',
       'cc.contextTotal': '共 {n} 条',
       'cc.contextEmpty': '暂无情境事件（观察器未推送或已暂停）',
       'cc.qqPending': '需要 bridge /dashboard（T18）上线后显示 QQ 近况',
@@ -405,6 +432,33 @@ window.__ModuleLoader__.load({
       'cc.section.qq': 'QQ recent',
       'cc.section.components': 'Components',
       'cc.section.actions': 'Actions',
+      'cc.coo.title': 'Coo plugins',
+      'cc.coo.running': 'Running · pid {pid}',
+      'cc.coo.stopped': 'Not running',
+      'cc.coo.openExtensions': 'Open extensions dir',
+      'cc.coo.openDownloads': 'Open downloads dir',
+      'cc.coo.openDir': 'Dir',
+      'cc.coo.downloaded': 'Downloaded',
+      'cc.coo.installed': 'Installed',
+      'cc.coo.addAndRun': 'Add and run',
+      'cc.coo.run': 'Run',
+      'cc.coo.restartAndRun': 'Restart and run',
+      'cc.coo.uninstall': 'Uninstall',
+      'cc.coo.empty': 'No plugins downloaded from the Coo market yet.',
+      'cc.coo.gotoMarket': 'Go to Coo Market',
+      'cc.coo.safety': 'Third-party extensions run inside Coopanion; judge their safety yourself.',
+      'cc.coo.confirmInstall': 'Add {name} to Coopanion? (pnpm add; restart Coopanion to load)',
+      'cc.coo.confirmUninstall': 'Uninstall {name} from Coopanion? (restart Coopanion to take effect)',
+      'cc.coo.confirmRestart': 'Restart Coopanion? This ends the current Coo main process (pet-host is untouched).',
+      'cc.coo.confirmRun': 'Launch Coopanion? Installed extensions load on startup.',
+      'cc.coo.actionDone': 'Done: {action}',
+      'cc.coo.needRestart': 'Coo is running; restart Coopanion to load new extensions (use "Restart and run").',
+      'cc.coo.needInstall': 'This plugin is not installed in Coopanion yet.',
+      'cc.coo.installedAndRunning': 'Added and launched Coopanion.',
+      'cc.coo.err': 'Failed to read Coo plugins',
+      'cc.coo.confirm': 'Confirm',
+      'cc.coo.cancel': 'Cancel',
+      'cc.coo.busy': 'Working…',
       'cc.contextTotal': '{n} events',
       'cc.contextEmpty': 'No context events yet (observer not pushing or paused)',
       'cc.qqPending': 'Needs bridge /dashboard (T18) to show QQ preview',
@@ -855,6 +909,48 @@ window.__ModuleLoader__.load({
     }
 
     /** 状态卡片模型（纯函数，供组件与测试使用）。 */
+    /** T33：合并「已下载」与「已安装」Coo 插件 → 总控台行。 */
+    function buildCooPluginRows(pluginData) {
+      const data = pluginData && typeof pluginData === 'object' ? pluginData : {};
+      const downloaded = Array.isArray(data.downloaded) ? data.downloaded : [];
+      const installed = Array.isArray(data.installed) ? data.installed : [];
+      const rows = [];
+      const seen = new Set();
+      for (const item of downloaded) {
+        if (!item || typeof item.name !== 'string' || seen.has(item.name)) continue;
+        const match = installed.find((entry) => entry && entry.name === item.name) ?? null;
+        rows.push({
+          name: item.name,
+          displayName: item.displayName || (match && match.displayName) || item.name,
+          version: item.version || (match && match.version) || '',
+          kind: item.kind || (match && match.kind) || 'other',
+          downloaded: true,
+          installed: item.installed === true || match !== null,
+          installedVersion: (match && match.version) || item.installedVersion || null,
+        });
+        seen.add(item.name);
+      }
+      for (const item of installed) {
+        if (!item || typeof item.name !== 'string' || seen.has(item.name)) continue;
+        rows.push({
+          name: item.name,
+          displayName: item.displayName || item.name,
+          version: item.version || '',
+          kind: item.kind || 'other',
+          downloaded: false,
+          installed: true,
+          installedVersion: item.version || null,
+        });
+        seen.add(item.name);
+      }
+      return rows;
+    }
+
+    /** kind → 文案（复用 Coo 市场的 kind 文案）。 */
+    function cooPluginKindLabel(kind, t) {
+      return t(`mkt.kind.${['world', 'provider', 'bot', 'panel'].includes(kind) ? kind : 'other'}`);
+    }
+
     function buildControlCards(status, t) {
       const translate = typeof t === 'function' ? t : fallbackTranslate;
       const bridge = status && status.bridge;
@@ -1066,6 +1162,22 @@ window.__ModuleLoader__.load({
       '.cc-chip[data-installed="no"]{color:var(--dsw-alias-state-warn-primary);border-color:var(--dsw-alias-state-warn-tertiary);}',
       '.cc-actions{display:flex;flex-wrap:wrap;gap:8px;}',
       '.wp-banner-ok{color:var(--dsw-alias-state-success-primary);}',
+      '.set-note{font-size:12px;line-height:1.7;color:var(--dsw-alias-label-tertiary);}',
+      '.set-note-warn{color:var(--dsw-alias-state-warn-primary);}',
+      '.set-note-error{color:var(--dsw-alias-state-error-primary);}',
+      '.cc-coo-rows{display:flex;flex-direction:column;gap:8px;}',
+      '.cc-coo-row{display:flex;flex-direction:column;gap:6px;padding:10px 12px;border-radius:10px;',
+      'border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-2);}',
+      '.cc-coo-row[data-installed="yes"]{border-color:var(--dsw-alias-state-success-tertiary);}',
+      '.cc-coo-main{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0;}',
+      '.cc-coo-name{font-size:13px;font-weight:600;color:var(--dsw-alias-label-primary);overflow-wrap:anywhere;}',
+      '.cc-coo-pkg{display:block;font-family:var(--dsh-code-font-family, monospace);font-size:11px;',
+      'color:var(--dsw-alias-label-tertiary);font-weight:400;overflow-wrap:anywhere;}',
+      '.cc-badge[data-kind="world"]{color:var(--dsw-alias-state-success-primary);border-color:var(--dsw-alias-state-success-tertiary);}',
+      '.cc-badge[data-kind="provider"]{color:var(--dsw-alias-state-warn-primary);border-color:var(--dsw-alias-state-warn-tertiary);}',
+      '.cc-badge[data-kind="bot"]{color:var(--dsw-alias-brand-primary);}',
+      '.cc-coo-confirm{display:flex;flex-direction:column;gap:6px;}',
+      '.cc-chip[data-installed="yes"]{color:var(--dsw-alias-state-success-primary);border-color:var(--dsw-alias-state-success-tertiary);}',
       '@media (max-width:720px){.cc-cards{grid-template-columns:repeat(auto-fit,minmax(140px,1fr));}}',
     ].join('');
 
@@ -1083,6 +1195,11 @@ window.__ModuleLoader__.load({
       const [notice, setNotice] = useState('');
       const [loading, setLoading] = useState(true);
       const [pauseBusy, setPauseBusy] = useState(false);
+      const [cooPlugins, setCooPlugins] = useState(null);
+      const [cooError, setCooError] = useState('');
+      const [cooNotice, setCooNotice] = useState('');
+      const [cooBusy, setCooBusy] = useState('');
+      const [cooConfirm, setCooConfirm] = useState(null);
       const aliveRef = useRef(false);
       const tRef = useRef(t);
       tRef.current = t;
@@ -1102,6 +1219,19 @@ window.__ModuleLoader__.load({
         return null;
       }, []);
 
+      /** T33：拉 Coo 插件列表（下载/已装/主程序状态）。 */
+      const loadCooPlugins = useCallback(async () => {
+        const result = await fetchJson(api('coo-plugins'), { timeoutMs: 15_000 });
+        if (!aliveRef.current) return null;
+        if (result.ok && result.data && result.data.ok === true) {
+          setCooPlugins(result.data);
+          setCooError('');
+          return result.data;
+        }
+        setCooError(`${tRef.current('cc.coo.err')}：${readableReason(result, tRef.current)}`);
+        return null;
+      }, []);
+
       // 只在「总控台」Tab 激活时刷新（切走就停定时器，省资源；T21）
       useEffect(() => {
         if (!active) return undefined;
@@ -1110,9 +1240,13 @@ window.__ModuleLoader__.load({
         load().finally(() => {
           if (mounted && aliveRef.current) setLoading(false);
         });
+        loadCooPlugins();
         const interval = Number(settings.refreshIntervalMs) || CONTROL_REFRESH_MS;
         const timer = setInterval(() => {
-          if (aliveRef.current) load();
+          if (aliveRef.current) {
+            load();
+            loadCooPlugins();
+          }
         }, interval);
         return () => {
           mounted = false;
@@ -1126,6 +1260,67 @@ window.__ModuleLoader__.load({
         load().finally(() => {
           if (aliveRef.current) setLoading(false);
         });
+        loadCooPlugins();
+      };
+
+      /** T33：执行一个 Coo 插件动作（install/uninstall/run/restart）。 */
+      const executeCooAction = async (action, name) => {
+        if (cooBusy !== '') return;
+        setCooBusy(`${action}:${name}`);
+        setCooError('');
+        setCooNotice('');
+        try {
+          const body = { name };
+          if (action === 'install' || action === 'uninstall' || action === 'restart') body.confirm = true;
+          const result = await fetchJson(api(`coo-plugins/${action}`), {
+            method: 'POST',
+            body,
+            timeoutMs: action === 'install' || action === 'uninstall' ? 320_000 : 25_000,
+          });
+          if (!aliveRef.current) return;
+          if (result.ok && result.data && result.data.ok === true) {
+            setCooNotice(result.data.message || tRef.current('cc.coo.actionDone').replace('{action}', action));
+            const refreshed = await loadCooPlugins();
+            if (action === 'install' && refreshed && refreshed.coo && refreshed.coo.running === false) {
+              const runResult = await fetchJson(api('coo-plugins/run'), { method: 'POST', body: { name }, timeoutMs: 25_000 });
+              if (aliveRef.current) {
+                if (runResult.ok && runResult.data && runResult.data.ok === true) setCooNotice(tRef.current('cc.coo.installedAndRunning'));
+                else if (runResult.status === 409) setCooNotice(tRef.current('cc.coo.needRestart'));
+                else setCooError(readableReason(runResult, tRef.current));
+                await loadCooPlugins();
+              }
+            }
+          } else if (result.status === 409 && result.data && result.data.needRestart) {
+            setCooNotice(tRef.current('cc.coo.needRestart'));
+            await loadCooPlugins();
+          } else if (result.status === 409 && result.data && result.data.needInstall) {
+            setCooError(tRef.current('cc.coo.needInstall'));
+          } else {
+            setCooError(readableReason(result, tRef.current));
+          }
+        } finally {
+          if (aliveRef.current) setCooBusy('');
+        }
+      };
+
+      const requestCooAction = (action, name) => {
+        setCooNotice('');
+        setCooError('');
+        setCooConfirm({ action, name });
+      };
+
+      const confirmCooAction = async () => {
+        const next = cooConfirm;
+        setCooConfirm(null);
+        if (next) await executeCooAction(next.action, next.name);
+      };
+
+      const openCooDir = async (which) => {
+        setCooNotice('');
+        const result = await fetchJson(api('coo-plugins/open-dir'), { method: 'POST', body: { which }, timeoutMs: 5_000 });
+        if (!aliveRef.current) return;
+        if (result.ok && result.data && result.data.ok === true) setCooNotice(result.data.path);
+        else setCooError(readableReason(result, tRef.current));
       };
 
       const togglePause = async () => {
@@ -1223,6 +1418,75 @@ window.__ModuleLoader__.load({
           h('div', { className: 'cc-card-title' }, card.title),
           h('div', { className: 'cc-card-value' }, card.value),
           card.sub !== '' ? h('div', { className: 'cc-card-sub' }, card.sub) : null))),
+          // ── T33：Coo 插件（下载 → 加入 → 运行/重启）──
+          h('div', { className: 'cc-section', 'data-coo-plugins': '1' },
+            h('div', { className: 'cc-section-head' },
+              h('span', { className: 'cc-section-title' }, t('cc.coo.title')),
+              h('span', { className: 'cc-section-meta' },
+                cooPlugins && cooPlugins.coo
+                  ? (cooPlugins.coo.running
+                    ? t('cc.coo.running').replace('{pid}', (cooPlugins.coo.pids || []).join(','))
+                    : t('cc.coo.stopped'))
+                  : t('cc.loading'))),
+            h('div', { className: 'cc-actions' },
+              h('button', { type: 'button', className: 'wp-btn', onClick: () => { loadCooPlugins(); }, disabled: cooBusy !== '' }, t('cc.refresh')),
+              h('button', { type: 'button', className: 'wp-btn', onClick: () => openCooDir('extensions') }, t('cc.coo.openExtensions')),
+              h('button', { type: 'button', className: 'wp-btn', onClick: () => openCooDir('downloads') }, t('cc.coo.openDownloads'))),
+            cooPlugins && cooPlugins.warning
+              ? h('div', { className: 'set-note set-note-warn' }, cooPlugins.warning)
+              : null,
+            cooError !== '' ? h('div', { className: 'set-note set-note-error' }, cooError) : null,
+            cooNotice !== '' ? h('div', { className: 'set-note' }, cooNotice) : null,
+            h('div', { className: 'set-note' }, t('cc.coo.safety')),
+            (() => {
+              const rows = buildCooPluginRows(cooPlugins);
+              const running = !!(cooPlugins && cooPlugins.coo && cooPlugins.coo.running);
+              if (rows.length === 0) {
+                return h('div', { className: 'cc-empty' },
+                  h('div', {}, t('cc.coo.empty')),
+                  switchTab !== null
+                    ? h('button', { type: 'button', className: 'wp-btn', onClick: () => switchTab('market') }, t('cc.coo.gotoMarket'))
+                    : null);
+              }
+              return h('div', { className: 'cc-coo-rows' }, rows.map((row) => h('div', { className: 'cc-coo-row', key: row.name, 'data-installed': row.installed ? 'yes' : 'no' },
+                h('div', { className: 'cc-coo-main' },
+                  h('span', { className: 'cc-coo-name' }, row.displayName, h('span', { className: 'cc-coo-pkg' }, row.name)),
+                  h('span', { className: 'cc-badge', 'data-kind': row.kind }, cooPluginKindLabel(row.kind, t)),
+                  row.version !== '' ? h('span', { className: 'cc-chip' }, `v${row.version}`) : null,
+                  row.installed ? h('span', { className: 'cc-chip', 'data-installed': 'yes' }, t('cc.coo.installed')) : null,
+                  row.downloaded && !row.installed ? h('span', { className: 'cc-chip' }, t('cc.coo.downloaded')) : null),
+                h('div', { className: 'cc-actions' },
+                  !row.installed && row.downloaded
+                    ? h('button', { type: 'button', className: 'wp-btn wp-btn-primary', disabled: cooBusy !== '', onClick: () => requestCooAction('install', row.name) }, t('cc.coo.addAndRun'))
+                    : null,
+                  row.installed
+                    ? h('button', {
+                      type: 'button',
+                      className: 'wp-btn wp-btn-primary',
+                      disabled: cooBusy !== '',
+                      onClick: () => requestCooAction(running ? 'restart' : 'run', row.name),
+                    }, running ? t('cc.coo.restartAndRun') : t('cc.coo.run'))
+                    : null,
+                  row.installed
+                    ? h('button', { type: 'button', className: 'wp-btn', disabled: cooBusy !== '', onClick: () => requestCooAction('uninstall', row.name) }, t('cc.coo.uninstall'))
+                    : null,
+                  h('button', { type: 'button', className: 'wp-btn', onClick: () => openCooDir(row.installed ? 'extensions' : 'downloads') }, t('cc.coo.openDir'))),
+                cooBusy === `install:${row.name}` || cooBusy === `uninstall:${row.name}` || cooBusy === `run:${row.name}` || cooBusy === `restart:${row.name}`
+                  ? h('div', { className: 'set-note' }, t('cc.coo.busy'))
+                  : null,
+                cooConfirm && cooConfirm.name === row.name
+                  ? h('div', { className: 'cc-coo-confirm' },
+                    h('div', { className: 'set-note set-note-warn' },
+                      cooConfirm.action === 'install' ? t('cc.coo.confirmInstall').replace('{name}', row.name)
+                        : cooConfirm.action === 'uninstall' ? t('cc.coo.confirmUninstall').replace('{name}', row.name)
+                          : cooConfirm.action === 'restart' ? t('cc.coo.confirmRestart')
+                            : t('cc.coo.confirmRun'),
+                      ' ', t('cc.coo.safety')),
+                    h('div', { className: 'cc-actions' },
+                      h('button', { type: 'button', className: 'wp-btn wp-btn-primary', disabled: cooBusy !== '', onClick: confirmCooAction }, t('cc.coo.confirm')),
+                      h('button', { type: 'button', className: 'wp-btn', disabled: cooBusy !== '', onClick: () => setCooConfirm(null) }, t('cc.coo.cancel'))))
+                  : null)));
+            })()),
           h('div', { className: 'cc-section', style: settings.sections.context ? undefined : { display: 'none' } },
             h('div', { className: 'cc-section-head' },
               h('span', { className: 'cc-section-title' }, t('cc.section.context')),
@@ -3215,6 +3479,8 @@ window.__ModuleLoader__.load({
         sortContextEvents,
         surfaceLabel,
         buildControlCards,
+        buildCooPluginRows,
+        cooPluginKindLabel,
         buildComponentRows,
         dashboardChip,
         ControlCenterIcon,

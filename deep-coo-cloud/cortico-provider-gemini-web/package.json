@@ -1,0 +1,9 @@
+{
+  "name": "cortico-provider-gemini-web",
+  "version": "0.1.4",
+  "description": "",
+  "cortico": {
+    "kind": "provider",
+    "displayName": "Gemini Web"
+  }
+}

@@ -13,7 +13,7 @@ T24 加「Coo 市场」Tab：浏览 npm 上的 Coo/Coopanion 扩展（Cortico �
 - Host 半：`index.js` —— 在 DSH Web 服务器注册同源路由 `/whale-panel/*`（聊天/设置/服务器 QQ 配置）与 `/control-center/*`（状态聚合/PAUSED，Tab 内复用），代理 bridge HTTP、转发 bridge token、按需 ssh 读写服务器 awareness patch。
 - Client 半：`client.js` —— 注册**一个** `sidebar.panellist`（id=`whale-chat`、label=「鲸歌」、order=5）与一个 `main` keyed 整页 Tab 外壳。
 - 无构建步骤（纯 ESM/CJS 工厂 bundle）；样式只用 DSH 主题 token（`--dsw-alias-*`），跟随明暗主题。
-- 版本：`2.1.0`（T30 形象包 ZIP 导入；包名 `deep-coo-cloud`）；离线测试 **120 项**（host / client / manifest / control-center / settings / pet-diy / pet-diy-import / coo-market / coo-market-download 九组）。
+- 版本：`2.2.0`（T33 总控台 Coo 插件列表/运行/重启；包名 `deep-coo-cloud`）；离线测试 **133 项**（host / client / manifest / control-center / settings / pet-diy / pet-diy-import / coo-market / coo-market-download / coo-plugins 十组）。
 - **可分发**：默认配置不含任何本机/服务器私有信息（IP/域名/QQ 号/路径/SSH key/token）；侧栏名称、面板标题、Tab 文案、桥接地址、服务器 SSH、QQ 白名单均可在「设置 → 通用/连接」里配置（保存到 `whale-panel/settings.json`）。
 - 「设置 → 桌宠 DIY」依赖 coo-fork 桌宠插件 **`dsh-coo-pet-remote@0.4.0-remote.1`**（T22）：写 `coo-pet-data/pet-settings.json` 后插件 ~1s 热应用；该插件 config 未覆盖 settingsFile，默认路径与本插件默认一致。
 
@@ -37,7 +37,7 @@ T24 加「Coo 市场」Tab：浏览 npm 上的 Coo/Coopanion 扩展（Cortico �
 | Tab | 内容 |
 | --- | --- |
 | **聊天**（默认） | 原「鲸歌 · 服务器人格」页：历史/实时消息、输入框、连接状态、心情 chip；发送键与气泡字号跟随设置 |
-| **总控台** | 原独立总控台全部内容：状态卡片 ×5（bridge/服务器/QQ桥/桌宠/心情）、情境流（5 条）、QQ 近况（4 行）、组件状态（observer/sync/mirror + 四个 Startup vbs）、操作（刷新 / 暂停恢复情境观察 / 复制诊断 / 切到设置）；**只在激活时每 N 秒刷新**（N 来自设置的刷新间隔，默认 10s） |
+| **总控台** | 原独立总控台全部内容：状态卡片 ×5（bridge/服务器/QQ桥/桌宠/心情）、情境流（5 条）、QQ 近况（4 行）、组件状态（observer/sync/mirror + 四个 Startup vbs）、操作（刷新 / 暂停恢复情境观察 / 复制诊断 / 切到设置）、Coo 插件（下载→加入 Coopanion→运行/重启 Coo）；**只在激活时每 N 秒刷新**（N 来自设置的刷新间隔，默认 10s） |
 | **设置** | 见下方清单；本地设置即时保存到 `whale-panel/settings.json`，服务器 QQ 配置应用会重启服务器 dsh-web（约 10s） |
 | **Coo 市场**（T24/T25） | 浏览 npm 上 Coo/Coopanion 的 Cortico 扩展（缓存 10min）：搜索/类型筛选/排序/月下载/已安装/已下载状态、详情展开；**一键下载到本机** `coo-extensions/`，可选「安装到 Coopanion（高级，二次确认 + 需重启）」；始终不执行扩展代码 |
 
@@ -123,6 +123,21 @@ Tab 状态记忆在 `localStorage`（key `whale-panel.tab`）；切走 Tab 会�
 - Host 所有路由在每次请求时合并 `config + settings.json` 得到 effective 设置（bridge 地址、SSH 主机、QQ 默认、UI 名称）。
 - **隐私**：插件源码/默认配置不含 IP、域名、QQ 号、绝对路径、SSH key、token；`settings.json` 与 `coo-extensions/` 是运行时本机文件，不在分发包内。
 
+### 1.5 总控台「Coo 插件」（T33）
+
+总控台新增「Coo 插件」卡，把「Coo 市场」下载的扩展加入 Coopanion 并运行：
+
+- **数据**：`GET /whale-panel/coo-plugins` → `coo:{running,pids,petHostPids,root,exe,canLaunch}` + `downloaded[]`（`<dshLinkRoot>/coo-extensions`，读 `package.json.cortico.kind`）+ `installed[]`（`<cooRoot>/data/extensions` 与 node_modules）；进程状态缓存 ~3s（避免频繁 PowerShell）。
+- **主程序判定**：`Coopanion.exe` 且 CommandLine **不含** `--pet-host`/`--type=` 的进程；pet-host/子进程永不杀。
+- **操作**（全部先二次确认，提示「第三方扩展将在 Coopanion 里运行，请自行判断安全」）：
+  - 「加入并运行」= `POST .../install {confirm:true}`（pnpm add）→ Coo 未运行则自动 `POST .../run`，Coo 在跑则提示需重启；
+  - 已安装：`POST .../run {name}`（未装 → 409 `needInstall`；已运行 → 409 `needRestart`；否则 `spawn(Coopanion.exe, {cwd:cooRoot, detached:true})`）；
+  - 「重启并运行」= `POST .../restart {confirm:true}`（只 `taskkill /PID` 主程序，等 ~1.5s 再 spawn；pet-host 不动）；
+  - 「卸载」= `POST .../uninstall {confirm:true}`（pnpm remove，需重启 Coo）；
+  - 「打开安装/下载目录」= `POST .../open-dir {which:'extensions'|'downloads'}`。
+- **Cortico 语义**：安装/卸载后必须重启 Coopanion 主程序才会加载/卸载扩展；本插件只操作 `coo-extensions` 与 `<cooRoot>/data/extensions`，**不执行任何扩展代码**。
+- 空态会提示「先去 Coo 市场下载插件」并可一键切到 Coo 市场 Tab。
+
 ## 2. 架构与鉴权（为什么有 Host 半）
 
 bridge 的 HTTP 接口（`/health` `/history` `/say` …）**没有 CORS 头**，浏览器从 DSH 页面
@@ -149,6 +164,10 @@ bridge 的 HTTP 接口（`/health` `/history` `/say` …）**没有 CORS 头**�
   GET  /whale-panel/pet-diy          ──────▶  读 pet-settings.json + 扫描 web/*/figure.json + skin.json   ──▶ coo-pet-data（只读）
   POST /whale-panel/pet-diy          ──────▶  白名单校验 + 合并写 pet-settings.json（原子写 + .bak 备份；插件 ~1s 热应用）
   POST /whale-panel/pet-diy/import-pack ────▶  原始 ZIP（≤128MB）→ 安全校验/解包 → coo-pet-data/figures|web/<id>（不执行）
+  GET  /whale-panel/coo-plugins        ──────▶  已下载/已安装 Coo 插件 + Coopanion 主程序状态（缓存 ~3s）
+  POST /whale-panel/coo-plugins/install|uninstall  ─▶  pnpm add/remove（confirm；需重启 Coopanion）
+  POST /whale-panel/coo-plugins/run|restart        ─▶  spawn Coopanion.exe / 只杀主程序后重启（不杀 pet-host）
+  POST /whale-panel/coo-plugins/open-dir           ─▶  explorer 打开 extensions/downloads
   GET  /whale-panel/coo-market       ──────▶  npm search(cortico) 缓存 10min + 扫 Coopanion extensions（只读） ──▶ registry.npmjs.org / 本机
   POST /whale-panel/coo-market/download  ────▶  下载 npm tarball（≤200MB/120s）→ 校验 tar 条目 → 解包到 dsh-link/coo-extensions/（不执行）
   POST /whale-panel/coo-market/install   ────▶  二次确认后用 Coopanion 自带 pnpm 安装到 extensions（需重启 Coopanion）
@@ -250,6 +269,8 @@ plugin_manager { action: "set_bundle", target: "@local/dsh-whale-panel", enabled
 | `cooDownloadMaxBytes` / `cooDownloadTimeoutMs` | `209715200` / `120000` | tarball 上限 200MB / 下载超时 120s |
 | `cooTarPath` | `tar.exe`（Windows 自动用 System32\tar.exe，避免 MSYS tar） | 解包用系统 tar（只解包，不执行包内容） |
 | `cooRoot` / `cooPnpmPath` | 空（自动探测 Coopanion 安装：环境变量/常见目录/运行中进程；pnpm 在 `<cooRoot>/resources/app/node_modules/pnpm/bin/pnpm.cjs`） | 安装到 Coopanion 时用的根与 pnpm |
+| `cooExeName` | `Coopanion.exe` | 要 spawn 的 Coo 主程序 exe（相对 `cooRoot`） |
+| `cooProcessCacheMs` / `cooRestartWaitMs` | `3000` / `1500` | Coopanion 进程状态缓存 / 重启时等待旧进程退出 |
 
 ### 前置条件
 
@@ -358,6 +379,18 @@ errors: 无
 - **私有值 grep 自查**：`index.js` / `client.js` / `cordis.patch.yml` / `test/*.mjs` 中不含 `<your-host>`、QQ 号、`D:/...` 本机路径、`C:/Users/...`、SSH key 文件名等私有值（README 全部用占位符；测试用 `example.test` / `group:<id>` 占位）。
 - T26 新增测试：默认通用值、UI/桥接/SSH/QQ 白名单校验与保存、显式空 SSH → `GET settings` 返回 disabled 且 `apply-awareness` 400 `ssh-disabled`、`GET /config` 下发 ui/sshEnabled/qqDefaults/paths、client `localizeWithUi`/Tab 文案覆盖/设置页「通用 / 连接」渲染。
 - 未实测真实「局域网 bridge」与真实 SSH 应用（默认禁用；需要的用户填 `serverSshHost` 后用）。全部测试离线 mock。
+
+### T33 联调记录（2026-10-29，未安装、未重启本机 DSH，未安装/未启动真 Coo）
+
+- 离线测试 **133/133 PASS**，新增 `coo-plugins.test.mjs` 11 项：进程分类（只把不含 `--pet-host`/`--type=` 的算主程序）、
+  下载/已装元数据扫描（`package.json.cortico.kind`/displayName）、GET 结构、install/uninstall 的 confirm 与 404、
+  run 未装 409 `needInstall`/在跑 409 `needRestart`/未跑 spawn、exe 缺失 400、restart 只杀主进程（pet-host 不动）、
+  open-dir、进程状态缓存；client 新增 2 项（`buildCooPluginRows` 合并/kind、总控台 Coo 插件卡静态渲染/空态）。
+- **真实只读冒烟**（本地临时 http server 调 Host handler，未装插件、未启动/未杀任何 Coo 进程）：
+  `GET /whale-panel/coo-plugins` → 200（首查 ~978ms，含 PowerShell 进程枚举；第二次缓存 ~9ms）；
+  `coo.running=false`，`petHostPids` 正确列出 pet-host/子进程、未误判为主程序；`cooRoot`/`exe`/`canLaunch` 正确；
+  已下载列表读到 2 个包（`cortico-world-screen-look`、`cortico-world-gaming-alont1`，kind=world，installed=false），
+  `installed=[]`（Coopanion extensions 当前为空）。**未做真实安装/启动/重启**（留给 Lead 真机验证）。
 
 ### T30 联调记录（2026-10-29，未安装、未重启本机 DSH）
 
@@ -474,6 +507,9 @@ errors: 无
 35. **形象包导入只支持 zip**（≤128MB，一个 zip 只能含一个 `figure.json`，id 需匹配 `^[a-z0-9][a-z0-9-]{0,31}$`）；只复制普通文件/目录（拒绝符号链接/特殊文件），不执行包内代码。
 36. **导入目标只写本机 `coo-pet-data/figures` 与 `web`**：不写 Coopanion 安装目录；`replace=1` 会先备份旧目录到 `figures/.backup-<id>-<ts>`（不会自动清理，可手动删）。
 37. **导入后需「刷新形象包列表」或重新打开设置页**才能在「形象包」下拉选中（本实现导入成功会自动刷新并选中，但不会自动保存 pet-settings/应用到桌面，需再点「保存并应用」）。
+38. **Coo 插件安装/卸载后必须重启 Coopanion 主程序才生效**（Cortico 语义）；「重启并运行」会结束当前 Coo 主程序（不影响 pet-host；正在使用的 Coo 窗口会关闭）。
+39. **Coo 插件操作会运行第三方代码**：安装/运行等于让 Coopanion 加载这些扩展，请自行判断来源与安全；本插件只执行 pnpm add/remove 与 spawn Coopanion.exe，不执行扩展代码。
+40. **依赖 Coopanion 安装可探测**（`cooRoot`/`Coopanion.exe`/自带 pnpm）：探测不到时卡片给出可读错误，可在 config 里显式配置 `cooRoot`/`cooPnpmPath`；安装/卸载走 Coopanion pnpm，失败会回显输出与手动操作提示。
 
 ## 6. 文件
 

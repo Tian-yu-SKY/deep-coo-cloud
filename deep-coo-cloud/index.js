@@ -163,6 +163,10 @@ export const DEFAULTS = Object.freeze({
   /** 桌宠形象包 ZIP 导入（T30）：上传上限 128MB / 解包超时 120s。 */
   petImportMaxBytes: 128 * 1024 * 1024,
   petImportTimeoutMs: 120_000,
+  /** Coo 插件列表/启动（T33）：主程序 exe / 进程状态缓存 / 重启等待。 */
+  cooExeName: 'Coopanion.exe',
+  cooProcessCacheMs: 3_000,
+  cooRestartWaitMs: 1_500,
   /** Coo 市场（T24）：npm registry 搜索 URL / 缓存 10min / 超时 / 本机 Coopanion 扩展目录（空=自动探测）。 */
   cooMarketUrl: 'https://registry.npmjs.org/-/v1/search?text=cortico&size=250',
   cooMarketCacheMs: 600_000,
@@ -418,6 +422,11 @@ export function resolveConfig(config = {}) {
       petPacksDir: resolveUnder(merged.petPacksDir, 'web'),
       petImportMaxBytes: positive(merged.petImportMaxBytes, DEFAULTS.petImportMaxBytes),
       petImportTimeoutMs: positive(merged.petImportTimeoutMs, DEFAULTS.petImportTimeoutMs),
+      cooExeName: typeof merged.cooExeName === 'string' && merged.cooExeName.trim() !== ''
+        ? merged.cooExeName.trim()
+        : DEFAULTS.cooExeName,
+      cooProcessCacheMs: positive(merged.cooProcessCacheMs, DEFAULTS.cooProcessCacheMs),
+      cooRestartWaitMs: positive(merged.cooRestartWaitMs, DEFAULTS.cooRestartWaitMs),
       cooMarketUrl: trimmed(merged.cooMarketUrl) !== '' ? trimmed(merged.cooMarketUrl) : DEFAULTS.cooMarketUrl,
       cooMarketCacheMs: positive(merged.cooMarketCacheMs, DEFAULTS.cooMarketCacheMs),
       cooMarketTimeoutMs: positive(merged.cooMarketTimeoutMs, DEFAULTS.cooMarketTimeoutMs),
@@ -518,6 +527,8 @@ export function createRouteHandler(settings, deps = {}) {
   const awarenessCache = { at: 0, value: null };
   // Coo 市场 npm 搜索结果缓存（10min；失败保留旧缓存）
   const marketCache = { at: 0, items: null, error: null };
+  // Coo 主程序进程状态缓存（~3s；避免总控台轮询频繁起 PowerShell）
+  const cooProcCache = { at: 0, value: null };
 
   return async function handleRoute(req, res) {
     let url;
@@ -604,6 +615,31 @@ export function createRouteHandler(settings, deps = {}) {
       if (path === `${ROUTE_PREFIX}/coo-market/open-dir`) {
         if (method !== 'POST') return methodNotAllowed(res, 'POST');
         return await handleCooMarketOpenDir(res, effective, deps);
+      }
+      // ── T33：Coo 插件列表 / 安装 / 卸载 / 运行 / 重启（主程序重启才加载新扩展；绝不杀 pet-host）──
+      if (path === `${ROUTE_PREFIX}/coo-plugins`) {
+        if (method !== 'GET') return methodNotAllowed(res, 'GET');
+        return await handleCooPluginsGet(res, effective, deps, cooProcCache);
+      }
+      if (path === `${ROUTE_PREFIX}/coo-plugins/install`) {
+        if (method !== 'POST') return methodNotAllowed(res, 'POST');
+        return await handleCooPluginsInstall(req, res, effective, deps, cooProcCache);
+      }
+      if (path === `${ROUTE_PREFIX}/coo-plugins/uninstall`) {
+        if (method !== 'POST') return methodNotAllowed(res, 'POST');
+        return await handleCooPluginsUninstall(req, res, effective, deps, cooProcCache);
+      }
+      if (path === `${ROUTE_PREFIX}/coo-plugins/run`) {
+        if (method !== 'POST') return methodNotAllowed(res, 'POST');
+        return await handleCooPluginsRun(req, res, effective, deps, cooProcCache);
+      }
+      if (path === `${ROUTE_PREFIX}/coo-plugins/restart`) {
+        if (method !== 'POST') return methodNotAllowed(res, 'POST');
+        return await handleCooPluginsRestart(req, res, effective, deps, cooProcCache);
+      }
+      if (path === `${ROUTE_PREFIX}/coo-plugins/open-dir`) {
+        if (method !== 'POST') return methodNotAllowed(res, 'POST');
+        return await handleCooPluginsOpenDir(req, res, effective, deps);
       }
       return sendJson(res, 404, {
         ok: false,
@@ -1482,6 +1518,414 @@ async function handlePetDiyPost(req, res, settings) {
   }
 }
 
+// ───────────────────────────── Coo 插件列表 / 启动（T33） ─────────────────────────────
+// 总控台「Coo 插件」卡：列出已下载（coo-extensions）与已安装（Coopanion data/extensions）的 Cortico 扩展；
+// 安装/卸载走 Coopanion 自带 pnpm → **需重启 Coopanion 主程序才加载**；运行/重启只 spawn Coopanion.exe，
+// 绝不杀带 --pet-host / --type= 的 pet-host 进程，也不执行任何扩展代码。
+
+/** 分类 Coopanion 进程：主程序 = 不含 --pet-host/--type=；其余算 pet-host/子进程。 */
+export function classifyCooProcesses(processes) {
+  const list = Array.isArray(processes) ? processes : [];
+  const main = [];
+  const petHost = [];
+  for (const entry of list) {
+    if (!entry || typeof entry !== 'object') continue;
+    const pid = Number(entry.pid ?? entry.ProcessId) || 0;
+    if (pid <= 0) continue;
+    const commandLine = typeof entry.commandLine === 'string'
+      ? entry.commandLine
+      : (typeof entry.CommandLine === 'string' ? entry.CommandLine : '');
+    if (commandLine.includes('--pet-host') || commandLine.includes('--type=')) petHost.push(pid);
+    else main.push(pid);
+  }
+  main.sort((left, right) => left - right);
+  petHost.sort((left, right) => left - right);
+  return { running: main.length > 0, pids: main, petHostPids: petHost };
+}
+
+/** 默认进程列表：PowerShell CIM 查 Coopanion.exe 的 PID+CommandLine（失败返回 []）。 */
+export function defaultListCoopanionProcesses(settings, timeoutMs = 8_000) {
+  const command = "Get-CimInstance Win32_Process -Filter \"Name='Coopanion.exe'\" | Select-Object ProcessId,CommandLine | ConvertTo-Json -Compress";
+  try {
+    const output = decodeCliOutput(execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', command], {
+      windowsHide: true, timeout: timeoutMs, encoding: 'buffer',
+    }));
+    const parsed = JSON.parse(String(output).trim() || '[]');
+    const array = Array.isArray(parsed) ? parsed : (parsed ? [parsed] : []);
+    return array
+      .map((entry) => ({ pid: Number(entry.ProcessId) || 0, commandLine: String(entry.CommandLine || '') }))
+      .filter((entry) => entry.pid > 0);
+  } catch {
+    return [];
+  }
+}
+
+/** 读 Coopanion 进程（缓存 ~3s）。 */
+async function readCooProcesses(settings, deps, cache) {
+  const now = Date.now();
+  const ttl = Math.max(200, Number(settings.cooProcessCacheMs) || 3_000);
+  if (cache.value !== null && now - cache.at < ttl) return cache.value;
+  const list = deps.listProcesses
+    ? await deps.listProcesses(settings)
+    : defaultListCoopanionProcesses(settings);
+  const classified = classifyCooProcesses(list);
+  cache.value = classified;
+  cache.at = now;
+  return classified;
+}
+
+/** 从本地 package.json 读 Coo 扩展元数据（kind/displayName 等）。 */
+export function readCooPluginPackage(packageFile) {
+  const pkg = readJsonSafe(packageFile);
+  if (!pkg || typeof pkg !== 'object' || typeof pkg.name !== 'string') return null;
+  const cortico = pkg.cortico && typeof pkg.cortico === 'object' ? pkg.cortico : {};
+  const rawKind = typeof cortico.kind === 'string' ? cortico.kind : '';
+  const kind = ['world', 'provider', 'bot', 'panel'].includes(rawKind) ? rawKind : 'other';
+  const displayName = localizedName(cortico.displayName ?? cortico.name ?? pkg.displayName ?? pkg.name, pkg.name);
+  return {
+    name: pkg.name,
+    version: typeof pkg.version === 'string' ? pkg.version : '',
+    kind,
+    displayName,
+    description: typeof pkg.description === 'string' ? pkg.description : '',
+  };
+}
+
+/** 扫描已下载（coo-extensions）的 Coo 插件元数据。 */
+export function scanDownloadedCooPlugins(dir) {
+  const entries = scanDownloadedExtensions(dir).downloaded;
+  return entries.map((entry) => {
+    const info = readCooPluginPackage(path.join(dir, entry.dir, 'package.json')) ?? {};
+    return {
+      name: entry.name,
+      version: info.version || entry.version,
+      kind: info.kind || 'other',
+      displayName: info.displayName || entry.name,
+      description: info.description || '',
+      downloadedAt: entry.downloadedAt,
+      bytes: entry.bytes,
+      dir: entry.dir,
+    };
+  }).sort((left, right) => String(left.name).localeCompare(String(right.name)));
+}
+
+/** 扫描 Coopanion 已安装的 Coo 插件（支持 extensions/<pkg> 与 extensions/node_modules/<pkg>、@scope）。 */
+export function scanInstalledCooPlugins(dir) {
+  const list = [];
+  const add = (packageFile, relativeDir) => {
+    const info = readCooPluginPackage(packageFile);
+    if (info) list.push({ ...info, dir: relativeDir });
+  };
+  let entries = [];
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return list;
+  }
+  for (const entry of entries) {
+    if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
+    if (entry.name === 'node_modules') {
+      try {
+        for (const child of readdirSync(path.join(dir, 'node_modules'), { withFileTypes: true })) {
+          // pnpm 的 node_modules/<pkg> 是指向 .pnpm/... 的符号链接；Dirent.isDirectory() 为 false，
+          // 必须把 symlink 也当目录读，否则「已安装」列表永远为空（真机踩过）。
+          if (child.name.startsWith('.')) continue;
+          if (!child.isDirectory() && !child.isSymbolicLink()) continue;
+          if (child.name.startsWith('@')) {
+            for (const scoped of readdirSync(path.join(dir, 'node_modules', child.name), { withFileTypes: true })) {
+              if (scoped.isDirectory() || scoped.isSymbolicLink()) add(path.join(dir, 'node_modules', child.name, scoped.name, 'package.json'), `${child.name}/${scoped.name}`);
+            }
+          } else {
+            add(path.join(dir, 'node_modules', child.name, 'package.json'), `node_modules/${child.name}`);
+          }
+        }
+      } catch { /* ignore */ }
+      continue;
+    }
+    add(path.join(dir, entry.name, 'package.json'), entry.name);
+  }
+  return list.sort((left, right) => String(left.name).localeCompare(String(right.name)));
+}
+
+/** Coo 根/exe/pnpm 上下文（root 未探测到 → ok:false）。 */
+export function resolveCooRuntime(settings) {
+  const coo = resolveCooPaths(settings);
+  const root = coo.root;
+  const exe = root !== '' ? path.join(root, settings.cooExeName || 'Coopanion.exe') : '';
+  return {
+    ...coo,
+    exe,
+    exeExists: exe !== '' && existsSync(exe),
+    rootExists: root !== '' && existsSync(root),
+  };
+}
+
+/** 默认卸载：Coopanion 自带 pnpm remove（只改 extensions 目录）。 */
+function defaultUninstallFromCoopanion(settings, name, deps = {}) {
+  const coo = resolveCooPaths(settings);
+  const pnpmPath = coo.pnpmPath;
+  if (pnpmPath === '' || !existsSync(pnpmPath)) {
+    return Promise.reject(new Error(`找不到 Coopanion 自带 pnpm${pnpmPath ? `：${pnpmPath}` : '（未探测到 Coopanion 安装）'}；可到 Coopanion 设置→扩展 手动卸载`));
+  }
+  return new Promise((resolve, reject) => {
+    execFile(process.execPath, [pnpmPath, 'remove', name, '--config.strict-dep-builds=false', '--dir', coo.extensionsDir, '--reporter=append-only'], {
+      cwd: coo.extensionsDir,
+      windowsHide: true,
+      timeout: 300_000,
+      maxBuffer: 4 * 1024 * 1024,
+    }, (error, stdout, stderr) => {
+      const output = `${stdout || ''}${stderr || ''}`.trim();
+      if (error) reject(new Error(`pnpm remove 失败：${error.message}\n${output.split(/\r?\n/).slice(-6).join('\n')}`));
+      else resolve({ output: output.split(/\r?\n/).slice(-8).join('\n') });
+    });
+  });
+}
+
+/** 默认启动 Coopanion 主程序（固定 exe，detached，不执行扩展代码）。 */
+export function spawnCoopanion(settings, runtime, deps = {}) {
+  const spawnImpl = typeof deps.spawnProcess === 'function' ? deps.spawnProcess : spawn;
+  // DSH 的宿主/工具进程可能带 ELECTRON_RUN_AS_NODE=1；Coopanion 是 Electron 应用，
+  // 继承这个变量会被当成 Node 跑并以 0 退出（真机踩过：点了「运行」窗口不出现）。
+  const env = { ...process.env };
+  delete env.ELECTRON_RUN_AS_NODE;
+  const child = spawnImpl(runtime.exe, [], {
+    cwd: runtime.root,
+    detached: true,
+    stdio: 'ignore',
+    windowsHide: false,
+    env,
+  });
+  if (child && typeof child.unref === 'function') child.unref();
+  return { pid: child && Number(child.pid) ? Number(child.pid) : null };
+}
+
+/** 默认杀主进程（taskkill /F）。 */
+function defaultKillProcess(pid) {
+  return new Promise((resolve) => {
+    execFile('taskkill', ['/PID', String(pid), '/F'], { windowsHide: true, timeout: 15_000 }, () => resolve());
+  });
+}
+
+function readJsonBodySafe(body) {
+  return body && typeof body === 'object' && !Array.isArray(body) ? body : null;
+}
+
+/** GET /whale-panel/coo-plugins：下载/已装/主程序状态。 */
+async function handleCooPluginsGet(res, settings, deps, procCache) {
+  const runtime = resolveCooRuntime(settings);
+  const processes = await readCooProcesses(settings, deps, procCache);
+  const downloaded = scanDownloadedCooPlugins(runtime.downloadsDir);
+  const installed = scanInstalledCooPlugins(runtime.extensionsDir);
+  const installedByName = new Map(installed.map((item) => [item.name, item]));
+  return sendJson(res, 200, {
+    ok: true,
+    coo: {
+      running: processes.running,
+      pids: processes.pids,
+      petHostPids: processes.petHostPids,
+      root: runtime.root || null,
+      exe: runtime.exeExists ? runtime.exe : null,
+      canLaunch: runtime.exeExists,
+    },
+    extensionsDir: runtime.extensionsDir,
+    downloadsDir: runtime.downloadsDir,
+    warning: runtime.root === '' ? '未探测到 Coopanion 安装目录（可通过 config cooRoot 指定）' : null,
+    downloaded: downloaded.map((item) => {
+      const installedItem = installedByName.get(item.name);
+      return {
+        ...item,
+        installed: Boolean(installedItem),
+        installedVersion: installedItem ? installedItem.version : null,
+      };
+    }),
+    installed,
+  });
+}
+
+/** POST /whale-panel/coo-plugins/install：只装已下载包（pnpm add），需 confirm。 */
+async function handleCooPluginsInstall(req, res, settings, deps, procCache) {
+  let body;
+  try {
+    body = readJsonBodySafe(await readJsonBody(req, settings.maxBodyBytes));
+  } catch (error) {
+    const status = error && error.code === 'payload-too-large' ? 413 : 400;
+    return sendJson(res, status, { ok: false, error: { code: 'bad-request', message: '读取请求体失败' } });
+  }
+  if (!body || body.confirm !== true) {
+    return sendJson(res, 400, { ok: false, error: { code: 'confirmation-required', message: '需要 confirm:true 才会把第三方扩展安装到 Coopanion（第三方代码将在 Coopanion 里运行，需重启 Coopanion 生效）。' } });
+  }
+  const validated = validatePackageName(body.name);
+  if (!validated.ok) return sendJson(res, 400, { ok: false, error: { code: 'invalid-name', message: validated.error } });
+  const runtime = resolveCooRuntime(settings);
+  if (runtime.root === '') return sendJson(res, 400, { ok: false, error: { code: 'coo-root-missing', message: '未探测到 Coopanion 安装目录（可通过 config cooRoot 指定）' } });
+  const downloaded = scanDownloadedCooPlugins(runtime.downloadsDir).find((item) => item.name === validated.name);
+  if (!downloaded) {
+    return sendJson(res, 404, { ok: false, error: { code: 'not-downloaded', message: `本机还没有下载 ${validated.name}（先到 Coo 市场下载）` } });
+  }
+  try {
+    const install = deps.runInstall
+      ? await deps.runInstall({ name: downloaded.name, version: downloaded.version, extensionsDir: runtime.extensionsDir, settings })
+      : await defaultInstallIntoCoopanion(settings, downloaded.name, downloaded.version);
+    procCache.value = null;
+    procCache.at = 0;
+    const processes = await readCooProcesses(settings, deps, procCache);
+    return sendJson(res, 200, {
+      ok: true,
+      installed: true,
+      name: downloaded.name,
+      version: downloaded.version,
+      needRestart: true,
+      cooRunning: processes.running,
+      pids: processes.pids,
+      extensionsDir: runtime.extensionsDir,
+      output: install && install.output ? String(install.output) : '',
+      message: processes.running
+        ? '已加入 Coopanion；Coo 正在运行，需重启 Coopanion 才会加载新扩展'
+        : '已加入 Coopanion；点击「运行」启动 Coopanion 后加载',
+    });
+  } catch (error) {
+    return sendJson(res, 500, { ok: false, error: { code: 'install-failed', message: error instanceof Error ? error.message : String(error), hint: '可到 Coopanion 设置 → 扩展 手动安装' } });
+  }
+}
+
+/** POST /whale-panel/coo-plugins/uninstall：只卸已装包（pnpm remove），需 confirm。 */
+async function handleCooPluginsUninstall(req, res, settings, deps, procCache) {
+  let body;
+  try {
+    body = readJsonBodySafe(await readJsonBody(req, settings.maxBodyBytes));
+  } catch (error) {
+    const status = error && error.code === 'payload-too-large' ? 413 : 400;
+    return sendJson(res, status, { ok: false, error: { code: 'bad-request', message: '读取请求体失败' } });
+  }
+  if (!body || body.confirm !== true) {
+    return sendJson(res, 400, { ok: false, error: { code: 'confirmation-required', message: '需要 confirm:true 才会从 Coopanion 卸载扩展（卸载后需重启 Coopanion 生效）。' } });
+  }
+  const validated = validatePackageName(body.name);
+  if (!validated.ok) return sendJson(res, 400, { ok: false, error: { code: 'invalid-name', message: validated.error } });
+  const runtime = resolveCooRuntime(settings);
+  if (runtime.root === '') return sendJson(res, 400, { ok: false, error: { code: 'coo-root-missing', message: '未探测到 Coopanion 安装目录' } });
+  const installed = scanInstalledCooPlugins(runtime.extensionsDir).find((item) => item.name === validated.name);
+  if (!installed) return sendJson(res, 404, { ok: false, error: { code: 'not-installed', message: `Coopanion 里没有安装 ${validated.name}` } });
+  try {
+    const removed = deps.runUninstall
+      ? await deps.runUninstall({ name: installed.name, extensionsDir: runtime.extensionsDir, settings })
+      : await defaultUninstallFromCoopanion(settings, installed.name);
+    procCache.value = null;
+    procCache.at = 0;
+    const processes = await readCooProcesses(settings, deps, procCache);
+    return sendJson(res, 200, {
+      ok: true,
+      removed: true,
+      name: installed.name,
+      needRestart: true,
+      cooRunning: processes.running,
+      output: removed && removed.output ? String(removed.output) : '',
+      message: '已从 Coopanion 卸载；需重启 Coopanion 使其不再加载',
+    });
+  } catch (error) {
+    return sendJson(res, 500, { ok: false, error: { code: 'uninstall-failed', message: error instanceof Error ? error.message : String(error), hint: '可到 Coopanion 设置 → 扩展 手动卸载' } });
+  }
+}
+
+/** POST /whale-panel/coo-plugins/run：已装且 Coo 未运行 → spawn 主程序；未装/在跑分别 409。 */
+async function handleCooPluginsRun(req, res, settings, deps, procCache) {
+  let body;
+  try {
+    body = readJsonBodySafe(await readJsonBody(req, settings.maxBodyBytes));
+  } catch (error) {
+    return sendJson(res, 400, { ok: false, error: { code: 'bad-request', message: '读取请求体失败' } });
+  }
+  const validated = validatePackageName(body && body.name);
+  if (!validated.ok) return sendJson(res, 400, { ok: false, error: { code: 'invalid-name', message: validated.error } });
+  const runtime = resolveCooRuntime(settings);
+  if (runtime.root === '') return sendJson(res, 400, { ok: false, error: { code: 'coo-root-missing', message: '未探测到 Coopanion 安装目录' } });
+  const installed = scanInstalledCooPlugins(runtime.extensionsDir).some((item) => item.name === validated.name);
+  if (!installed) return sendJson(res, 409, { ok: false, error: { code: 'need-install', message: `先安装 ${validated.name} 再运行` }, needInstall: true, name: validated.name });
+  procCache.value = null;
+  procCache.at = 0;
+  const processes = await readCooProcesses(settings, deps, procCache);
+  if (processes.running) {
+    return sendJson(res, 409, { ok: false, error: { code: 'need-restart', message: 'Coo 已经在运行；新扩展需要重启 Coopanion 才加载' }, needRestart: true, pids: processes.pids });
+  }
+  if (!runtime.exeExists) return sendJson(res, 400, { ok: false, error: { code: 'coo-exe-missing', message: `找不到 ${runtime.exe}（可检查 config cooRoot/cooExeName）` } });
+  try {
+    const launched = deps.spawnCoopanion ? await deps.spawnCoopanion(settings, runtime) : spawnCoopanion(settings, runtime);
+    procCache.value = null;
+    return sendJson(res, 200, {
+      ok: true,
+      launched: true,
+      pid: launched && launched.pid ? launched.pid : null,
+      exe: runtime.exe,
+      message: '已启动 Coopanion；新扩展会在 Coopanion 启动时加载',
+    });
+  } catch (error) {
+    return sendJson(res, 500, { ok: false, error: { code: 'launch-failed', message: error instanceof Error ? error.message : String(error) } });
+  }
+}
+
+/** POST /whale-panel/coo-plugins/restart：confirm 后只杀主进程（不含 --pet-host/--type=）再 spawn。 */
+async function handleCooPluginsRestart(req, res, settings, deps, procCache) {
+  let body;
+  try {
+    body = readJsonBodySafe(await readJsonBody(req, settings.maxBodyBytes));
+  } catch (error) {
+    return sendJson(res, 400, { ok: false, error: { code: 'bad-request', message: '读取请求体失败' } });
+  }
+  if (!body || body.confirm !== true) {
+    return sendJson(res, 400, { ok: false, error: { code: 'confirmation-required', message: '需要 confirm:true 才会重启 Coopanion（会结束当前 Coo 主程序，不影响 pet-host）。' } });
+  }
+  const runtime = resolveCooRuntime(settings);
+  if (runtime.root === '') return sendJson(res, 400, { ok: false, error: { code: 'coo-root-missing', message: '未探测到 Coopanion 安装目录' } });
+  if (!runtime.exeExists) return sendJson(res, 400, { ok: false, error: { code: 'coo-exe-missing', message: `找不到 ${runtime.exe}` } });
+  procCache.value = null;
+  procCache.at = 0;
+  const processes = await readCooProcesses(settings, deps, procCache);
+  const killed = [];
+  try {
+    for (const pid of processes.pids) {
+      if (pid <= 0 || processes.petHostPids.includes(pid)) continue;
+      if (deps.killProcess) await deps.killProcess(pid);
+      else await defaultKillProcess(pid);
+      killed.push(pid);
+    }
+    const waitMs = Math.max(0, Number(settings.cooRestartWaitMs) || 1_500);
+    if (waitMs > 0) await new Promise((resolve) => setTimeout(resolve, waitMs));
+    const launched = deps.spawnCoopanion ? await deps.spawnCoopanion(settings, runtime) : spawnCoopanion(settings, runtime);
+    procCache.value = null;
+    return sendJson(res, 200, {
+      ok: true,
+      restarted: true,
+      killed,
+      launched: true,
+      pid: launched && launched.pid ? launched.pid : null,
+      petHostPids: processes.petHostPids,
+      message: '已重启 Coopanion 主程序（pet-host 未受影响）；新扩展会在启动时加载',
+    });
+  } catch (error) {
+    return sendJson(res, 500, { ok: false, error: { code: 'restart-failed', message: error instanceof Error ? error.message : String(error), killed } });
+  }
+}
+
+/** POST /whale-panel/coo-plugins/open-dir：explorer 打开 extensions/downloads 固定目录。 */
+async function handleCooPluginsOpenDir(req, res, settings, deps) {
+  if (process.platform !== 'win32') {
+    return sendJson(res, 501, { ok: false, error: { code: 'unsupported-platform', message: '打开目录仅支持 Windows' } });
+  }
+  let body = null;
+  try { body = readJsonBodySafe(await readJsonBody(req, settings.maxBodyBytes)); } catch { body = null; }
+  const which = body && body.which === 'downloads' ? 'downloads' : 'extensions';
+  const runtime = resolveCooRuntime(settings);
+  const target = which === 'downloads' ? runtime.downloadsDir : runtime.extensionsDir;
+  try {
+    mkdirSync(target, { recursive: true });
+    const execFileImpl = deps.execFile ?? execFile;
+    execFileImpl('explorer.exe', [target], { windowsHide: false }, () => {});
+    return sendJson(res, 200, { ok: true, path: target, which });
+  } catch (error) {
+    return sendJson(res, 500, { ok: false, error: { code: 'open-failed', message: error instanceof Error ? error.message : String(error) } });
+  }
+}
+
 // ───────────────────────────── 桌宠形象包 ZIP 导入（T30） ─────────────────────────────
 // 用户把 Coo 形象包 zip 上传到本机 → 校验 zip 条目/路径穿越 → 解包临时目录 → 找 figure.json
 // → 校验 id → 安装到 coo-pet-data/figures/<id> 与 web/<id>（已存在 409；replace=1 先备份）。
@@ -2230,7 +2674,7 @@ async function defaultInstallIntoCoopanion(settings, name, version, deps = {}) {
   }
   const spec = version ? `${name}@${version}` : name;
   return new Promise((resolve, reject) => {
-    execFile(process.execPath, [pnpmPath, 'add', spec, '--dir', extensionsDir, '--reporter=append-only'], {
+    execFile(process.execPath, [pnpmPath, 'add', spec, '--config.strict-dep-builds=false', '--dir', extensionsDir, '--reporter=append-only'], {
       cwd: extensionsDir,
       windowsHide: true,
       timeout: 300_000,

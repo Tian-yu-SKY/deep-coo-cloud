@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "deep-coo-cloud",
-    "description": "deep-coo-cloud console: Chat / Control Center / Settings / Coo Market / Pet DIY; imports Coo figure-pack ZIPs safely (extract only, never executes pack code)."
+    "description": "deep-coo-cloud console: Chat / Control Center / Settings / Coo Market / Pet DIY; Control Center adds downloaded Coo plugins to Coopanion and can run/restart Coo (never executes extension code)."
   }
 }

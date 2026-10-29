@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "deep-coo-cloud",
-    "description": "「deep-coo-cloud」控制台：聊天/总控台/设置/Coo 市场/桌宠 DIY；支持导入 Coo 形象包 ZIP（只解包到本机，不执行扩展代码）。"
+    "description": "「deep-coo-cloud」控制台：聊天/总控台/设置/Coo 市场/桌宠 DIY；总控台可把 Coo 市场下载的插件加入 Coopanion 并运行/重启 Coo（不执行扩展代码）。"
   }
 }
