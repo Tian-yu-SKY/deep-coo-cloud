@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "deep-coo-cloud",
-    "description": "deep-coo-cloud console: Chat / Control Center / Settings / Coo Market / Pet DIY; Control Center shows local pet plugin status (foreground/cross-chat/DIY/screen) with Coopanion extensions collapsed; keeps remote persona and QQ identity."
+    "description": "deep-coo-cloud console: Chat / Control Center / Settings / Coo Market / Pet DIY; Control Center can look at the screen via local Ollama vision (screenshots stay local), shows native pet plugin status; Coopanion extensions collapsed."
   }
 }

@@ -163,6 +163,12 @@ export const DEFAULTS = Object.freeze({
   /** 桌宠形象包 ZIP 导入（T30）：上传上限 128MB / 解包超时 120s。 */
   petImportMaxBytes: 128 * 1024 * 1024,
   petImportTimeoutMs: 120_000,
+  /** 本机视觉模型（T35）：Ollama endpoint / 模型 / prompt / 推理超时 / 截图目录（空=cooPetDataRoot/screenshots）。 */
+  visionEndpoint: 'http://127.0.0.1:11434',
+  visionModel: 'qwen2.5vl:3b',
+  visionPrompt: '用两三句中文描述这张屏幕截图：用户可能正在做什么、画面里有什么明显内容。不要逐字读屏，不要猜测隐私信息；看不清就简短说明。',
+  visionTimeoutMs: 120_000,
+  screenShotDir: '',
   /** Coo 插件列表/启动（T33）：主程序 exe / 进程状态缓存 / 重启等待。 */
   cooExeName: 'Coopanion.exe',
   cooProcessCacheMs: 3_000,
@@ -422,6 +428,17 @@ export function resolveConfig(config = {}) {
       petPacksDir: resolveUnder(merged.petPacksDir, 'web'),
       petImportMaxBytes: positive(merged.petImportMaxBytes, DEFAULTS.petImportMaxBytes),
       petImportTimeoutMs: positive(merged.petImportTimeoutMs, DEFAULTS.petImportTimeoutMs),
+      visionEndpoint: typeof merged.visionEndpoint === 'string' && merged.visionEndpoint.trim() !== ''
+        ? merged.visionEndpoint.trim()
+        : DEFAULTS.visionEndpoint,
+      visionModel: typeof merged.visionModel === 'string' && merged.visionModel.trim() !== ''
+        ? merged.visionModel.trim()
+        : DEFAULTS.visionModel,
+      visionPrompt: typeof merged.visionPrompt === 'string' && merged.visionPrompt.trim() !== ''
+        ? merged.visionPrompt.trim()
+        : DEFAULTS.visionPrompt,
+      visionTimeoutMs: positive(merged.visionTimeoutMs, DEFAULTS.visionTimeoutMs),
+      screenShotDir: typeof merged.screenShotDir === 'string' ? merged.screenShotDir.trim() : '',
       cooExeName: typeof merged.cooExeName === 'string' && merged.cooExeName.trim() !== ''
         ? merged.cooExeName.trim()
         : DEFAULTS.cooExeName,
@@ -529,6 +546,8 @@ export function createRouteHandler(settings, deps = {}) {
   const marketCache = { at: 0, items: null, error: null };
   // Coo 主程序进程状态缓存（~3s；避免总控台轮询频繁起 PowerShell）
   const cooProcCache = { at: 0, value: null };
+  // 本机视觉模型（Ollama）探测缓存 10s
+  const visionProbeCache = { at: 0, value: null };
 
   return async function handleRoute(req, res) {
     let url;
@@ -644,7 +663,12 @@ export function createRouteHandler(settings, deps = {}) {
       // ── T34：本机桌宠插件（远程人格原生能力，只读聚合；与 Coopanion 扩展无关）──
       if (path === `${ROUTE_PREFIX}/pet-plugins`) {
         if (method !== 'GET') return methodNotAllowed(res, 'GET');
-        return await handlePetPluginsGet(res, effective);
+        return await handlePetPluginsGet(res, effective, deps, visionProbeCache);
+      }
+      // ── T35：看屏幕（PowerShell 截图 → 本机 Ollama 视觉模型；不向外发图）──
+      if (path === `${ROUTE_PREFIX}/screen-look`) {
+        if (method !== 'POST') return methodNotAllowed(res, 'POST');
+        return await handleScreenLook(req, res, effective, deps);
       }
       return sendJson(res, 404, {
         ok: false,
@@ -1523,6 +1547,194 @@ async function handlePetDiyPost(req, res, settings) {
   }
 }
 
+// ───────────────────────────── 本机视觉模型 / 看屏幕（T35） ─────────────────────────────
+// 只访问配置的回环 Ollama；截图只写本机 coo-pet-data/screenshots，不外发、不执行第三方代码。
+
+const VISION_PROBE_TIMEOUT_MS = 1_500;
+const VISION_PROBE_CACHE_MS = 10_000;
+const SCREEN_WIDTH = 1280;
+const SCREEN_HEIGHT = 720;
+
+/** 视觉 endpoint 只允许 http/https + 回环。 */
+export function normalizeVisionEndpoint(value) {
+  try {
+    const url = new URL(String(value ?? ''));
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return '';
+    const host = url.hostname.toLowerCase();
+    if (host !== 'localhost' && host !== '127.0.0.1' && host !== '::1' && host !== '[::1]') return '';
+    return `${url.protocol}//${url.host}`;
+  } catch {
+    return '';
+  }
+}
+
+/** 探测本机 Ollama 是否装有 visionModel（1.5s 超时，缓存 10s；失败不影响整个接口）。 */
+export async function probeVision(settings, deps = {}, cache = { at: 0, value: null }) {
+  const endpoint = normalizeVisionEndpoint(settings.visionEndpoint);
+  const model = typeof settings.visionModel === 'string' ? settings.visionModel.trim() : '';
+  if (endpoint === '' || model === '') {
+    return { available: false, model, endpoint, reason: '未配置视觉模型 endpoint/model（或 endpoint 不是回环地址）' };
+  }
+  const now = Date.now();
+  if (cache.value !== null && now - cache.at < VISION_PROBE_CACHE_MS) return cache.value;
+  const fetchImpl = deps.visionFetch ?? deps.fetchImpl ?? globalThis.fetch;
+  let value;
+  try {
+    const response = await fetchImpl(`${endpoint}/api/tags`, {
+      headers: { accept: 'application/json' },
+      signal: typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
+        ? AbortSignal.timeout(VISION_PROBE_TIMEOUT_MS)
+        : undefined,
+    });
+    if (!response || response.ok !== true) throw new Error(`HTTP ${response && response.status ? response.status : 'unknown'}`);
+    const data = await response.json();
+    const models = Array.isArray(data && data.models)
+      ? data.models.map((entry) => (entry && typeof entry.name === 'string' ? entry.name : '')).filter((name) => name !== '')
+      : [];
+    const present = models.some((name) => name === model
+      || name.startsWith(`${model}`)
+      || model.startsWith(`${name}:`));
+    value = present
+      ? { available: true, model, endpoint, modelsCount: models.length }
+      : { available: false, model, endpoint, modelsCount: models.length, reason: `本地视觉模型未运行/未安装（Ollama /api/tags 里没有 ${model}）` };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    value = { available: false, model, endpoint, reason: `视觉模型不可用：${message}` };
+  }
+  cache.value = value;
+  cache.at = now;
+  return value;
+}
+
+/** 截图路径（默认 <cooPetDataRoot>/screenshots/latest.jpg）。 */
+export function resolveScreenshotPath(settings) {
+  const petPaths = petDiyPaths(settings);
+  const dir = typeof settings.screenShotDir === 'string' && settings.screenShotDir.trim() !== ''
+    ? path.resolve(settings.screenShotDir.trim())
+    : path.join(petPaths.dataRoot, 'screenshots');
+  return path.join(dir, 'latest.jpg');
+}
+
+/** PowerShell + System.Drawing 截主屏，缩放到 1280x720 JPEG（质量 80）。 */
+export async function captureScreenJpeg(settings, screenshotPath, deps = {}) {
+  if (typeof deps.captureScreen === 'function') {
+    const result = await deps.captureScreen(settings, screenshotPath);
+    const bytes = Number(result && result.bytes) || (existsSync(screenshotPath) ? statSync(screenshotPath).size : 0);
+    if (bytes <= 0) throw Object.assign(new Error('截图文件为空'), { code: 'capture-failed' });
+    return { bytes };
+  }
+  if (process.platform !== 'win32') {
+    throw Object.assign(new Error('看屏幕只支持 Windows 本机截图'), { code: 'unsupported-platform' });
+  }
+  mkdirSync(path.dirname(screenshotPath), { recursive: true });
+  const safePath = String(screenshotPath).replace(/'/g, "''");
+  const script = [
+    'Add-Type -AssemblyName System.Windows.Forms,System.Drawing;',
+    '$s=[System.Windows.Forms.SystemInformation]::VirtualScreen;',
+    `$w=${SCREEN_WIDTH};$h=${SCREEN_HEIGHT};`,
+    '$src=[System.Drawing.Bitmap]::new($s.Width,$s.Height);',
+    '$sg=[System.Drawing.Graphics]::FromImage($src);',
+    '$sg.CopyFromScreen($s.X,$s.Y,0,0,$s.Size);',
+    '$bmp=[System.Drawing.Bitmap]::new($w,$h);',
+    '$g=[System.Drawing.Graphics]::FromImage($bmp);',
+    '$g.InterpolationMode=[System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic;',
+    '$g.DrawImage($src,0,0,$w,$h);',
+    "$codec=[System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() | Where-Object {$_.MimeType -eq 'image/jpeg'} | Select-Object -First 1;",
+    '$params=[System.Drawing.Imaging.EncoderParameters]::new(1);',
+    '$params.Param[0]=[System.Drawing.Imaging.EncoderParameter]::new([System.Drawing.Imaging.Encoder]::Quality,80);',
+    `$bmp.Save('${safePath}',$codec,$params);`,
+    '$sg.Dispose();$g.Dispose();$src.Dispose();$bmp.Dispose();',
+  ].join(' ');
+  await new Promise((resolve, reject) => {
+    execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
+      windowsHide: true,
+      timeout: 30_000,
+      maxBuffer: 1024 * 1024,
+    }, (error, stdout, stderr) => {
+      if (error) reject(Object.assign(new Error(`截图失败：${(stderr || '').trim() || error.message}`), { code: 'capture-failed' }));
+      else resolve();
+    });
+  });
+  if (!existsSync(screenshotPath)) throw Object.assign(new Error('截图失败：文件未生成'), { code: 'capture-failed' });
+  const bytes = statSync(screenshotPath).size;
+  if (bytes <= 0) throw Object.assign(new Error('截图失败：文件为空'), { code: 'capture-failed' });
+  return { bytes };
+}
+
+/** 调本机 Ollama /api/generate（图片只发到 loopback）。 */
+export async function callVisionModel(settings, imageBuffer, deps = {}) {
+  const endpoint = normalizeVisionEndpoint(settings.visionEndpoint);
+  const model = typeof settings.visionModel === 'string' ? settings.visionModel.trim() : '';
+  if (endpoint === '' || model === '') {
+    throw Object.assign(new Error('未配置视觉模型 endpoint/model（endpoint 必须是回环地址）'), { code: 'vision-unavailable', status: 502 });
+  }
+  const prompt = typeof settings.visionPrompt === 'string' && settings.visionPrompt.trim() !== ''
+    ? settings.visionPrompt.trim()
+    : '用两三句中文描述这张屏幕截图。';
+  const timeoutMs = Math.max(1_000, Number(settings.visionTimeoutMs) || 120_000);
+  const fetchImpl = deps.visionFetch ?? deps.fetchImpl ?? globalThis.fetch;
+  const startedAt = Date.now();
+  let response;
+  try {
+    response = await fetchImpl(`${endpoint}/api/generate`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', accept: 'application/json' },
+      body: JSON.stringify({
+        model,
+        prompt,
+        images: [imageBuffer.toString('base64')],
+        stream: false,
+        options: { num_ctx: 8192, num_predict: 160, temperature: 0.2 },
+      }),
+      signal: typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
+        ? AbortSignal.timeout(timeoutMs)
+        : undefined,
+    });
+  } catch (error) {
+    const timeout = error && (error.name === 'TimeoutError' || error.name === 'AbortError' || error.code === 'ETIMEDOUT');
+    throw Object.assign(
+      new Error(timeout ? `视觉模型推理超时（>${Math.round(timeoutMs / 1000)}s）` : `视觉模型请求失败：${error instanceof Error ? error.message : String(error)}`),
+      { code: timeout ? 'vision-timeout' : 'vision-request-failed', status: timeout ? 504 : 502 },
+    );
+  }
+  if (!response || response.ok !== true) {
+    let detail = '';
+    try { detail = response && typeof response.text === 'function' ? String(await response.text()).slice(0, 200) : ''; } catch { detail = ''; }
+    throw Object.assign(new Error(`视觉模型返回 HTTP ${response && response.status ? response.status : 'unknown'}${detail ? `：${detail}` : ''}`), { code: 'vision-http-error', status: 502 });
+  }
+  const data = await response.json();
+  const caption = data && typeof data.response === 'string' ? data.response.trim() : '';
+  if (caption === '') throw Object.assign(new Error('视觉模型没有返回描述'), { code: 'vision-empty', status: 502 });
+  return { caption, model, elapsedMs: Date.now() - startedAt };
+}
+
+/** POST /whale-panel/screen-look：截图 → Ollama 视觉描述（只在本机，不向外发图）。 */
+async function handleScreenLook(req, res, settings, deps) {
+  const screenshotPath = resolveScreenshotPath(settings);
+  let capture;
+  try {
+    capture = await captureScreenJpeg(settings, screenshotPath, deps);
+  } catch (error) {
+    return sendJson(res, 502, { ok: false, error: { code: (error && error.code) || 'capture-failed', message: error instanceof Error ? error.message : String(error) } });
+  }
+  let result;
+  try {
+    const image = readFileSync(screenshotPath);
+    result = await callVisionModel(settings, image, deps);
+  } catch (error) {
+    const status = error && Number(error.status) ? Number(error.status) : 502;
+    return sendJson(res, status, { ok: false, error: { code: (error && error.code) || 'vision-failed', message: error instanceof Error ? error.message : String(error) } });
+  }
+  return sendJson(res, 200, {
+    ok: true,
+    caption: result.caption,
+    model: result.model,
+    elapsedMs: result.elapsedMs,
+    screenshot: { path: screenshotPath, bytes: capture.bytes },
+    note: '截图只保存在本机 coo-pet-data/screenshots/latest.jpg，并只发到本机回环 Ollama。',
+  });
+}
+
 // ───────────────────────────── 本机桌宠插件（T34） ─────────────────────────────
 // 「本机桌宠」= dsh-coo-pet-remote（远程 DSH 人格）里的原生能力，不是 Coopanion 扩展。
 // 这个接口只读聚合：context-observer 的前台感知、跨端接话配置、桌宠 DIY 形象包数量、看屏幕可用性。
@@ -1532,7 +1744,7 @@ async function handlePetDiyPost(req, res, settings) {
  * `GET /whale-panel/pet-plugins`：本机桌宠原生能力状态。
  * 只读现有 observer 状态文件 + 设置 + 形象包目录。
  */
-async function handlePetPluginsGet(res, settings) {
+async function handlePetPluginsGet(res, settings, deps = {}, visionProbeCache = { at: 0, value: null }) {
   const now = Date.now();
   const components = collectControlComponents(settings, now);
   const observer = components.observer ?? {};
@@ -1580,8 +1792,7 @@ async function handlePetPluginsGet(res, settings) {
       note: '桌宠 DIY（形象包/大小/气泡/主题）只改本机外观，不改远程人格。',
     },
     screen: {
-      available: false,
-      reason: '需要视觉模型：当前远程 DSH 为文本模型，看不到屏幕画面；暂不提供该插件。',
+      ...(await probeVision(settings, deps, visionProbeCache)),
       requires: 'vision-model',
     },
     note: '这些是本机桌宠（远程 DSH 人格）的原生插件，不是 Coopanion 扩展；保留远程人格、记忆与 QQ 同一身份。',

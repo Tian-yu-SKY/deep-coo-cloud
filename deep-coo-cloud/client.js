@@ -172,6 +172,13 @@ window.__ModuleLoader__.load({
       'cc.pet.screen.title': '看屏幕（实验）',
       'cc.pet.screen.unavailable': '不可用',
       'cc.pet.screen.reason': '需要视觉模型：当前远程 DSH 是文本模型，看不到屏幕画面。',
+      'cc.pet.screen.available': '可用',
+      'cc.pet.screen.look': '看一眼屏幕',
+      'cc.pet.screen.loading': '正在看…',
+      'cc.pet.screen.captionTitle': '屏幕描述',
+      'cc.pet.screen.failed': '看屏幕失败',
+      'cc.pet.screen.empty': '视觉模型没有返回描述。',
+      'cc.pet.screen.privacy': '截图只保存在本机 coo-pet-data/screenshots/latest.jpg，只发给本机回环 Ollama。',
       'cc.pet.settings': '去设置',
       'cc.pet.err': '本机桌宠插件状态读取失败',
       'cc.coo.title': 'Coo 插件',
@@ -477,6 +484,13 @@ window.__ModuleLoader__.load({
       'cc.pet.screen.title': 'Screen look (experimental)',
       'cc.pet.screen.unavailable': 'Unavailable',
       'cc.pet.screen.reason': 'Requires a vision model; the remote DSH is text-only and cannot see the screen.',
+      'cc.pet.screen.available': 'Available',
+      'cc.pet.screen.look': 'Look at screen once',
+      'cc.pet.screen.loading': 'Looking…',
+      'cc.pet.screen.captionTitle': 'Screen caption',
+      'cc.pet.screen.failed': 'Screen look failed',
+      'cc.pet.screen.empty': 'The vision model returned no caption.',
+      'cc.pet.screen.privacy': 'Screenshot stays in local coo-pet-data/screenshots/latest.jpg and is sent only to loopback Ollama.',
       'cc.pet.settings': 'Open settings',
       'cc.pet.err': 'Failed to read local pet plugin status',
       'cc.coo.title': 'Coo plugins',
@@ -1018,11 +1032,13 @@ window.__ModuleLoader__.load({
           kind: 'native',
           title: t('cc.pet.screen.title'),
           state: screen.available === true ? 'ok' : 'warn',
-          status: t('cc.pet.screen.unavailable'),
-          detail: screen.reason ? String(screen.reason) : t('cc.pet.screen.reason'),
-          action: null,
-          actionLabel: '',
-          enabled: false,
+          status: screen.available === true ? t('cc.pet.screen.available') : t('cc.pet.screen.unavailable'),
+          detail: screen.available === true
+            ? (screen.model ? `${String(screen.model)} · ${String(screen.endpoint || '')}` : t('cc.pet.screen.privacy'))
+            : (screen.reason ? String(screen.reason) : t('cc.pet.screen.reason')),
+          action: 'screen',
+          actionLabel: t('cc.pet.screen.look'),
+          enabled: screen.available === true,
         },
       ];
     }
@@ -1311,6 +1327,12 @@ window.__ModuleLoader__.load({
       '.cc-pet-main{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}',
       '.cc-pet-name{font-size:13px;font-weight:600;color:var(--dsw-alias-label-primary);}',
       '.cc-pet-detail{font-size:12px;line-height:1.6;color:var(--dsw-alias-label-tertiary);overflow-wrap:anywhere;}',
+      '.cc-screen-caption{display:flex;flex-direction:column;gap:4px;padding:8px 10px;border-radius:8px;',
+      'border:1px dashed var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);}',
+      '.cc-screen-caption-head{display:flex;align-items:center;justify-content:space-between;gap:8px;',
+      'font-size:12px;font-weight:600;color:var(--dsw-alias-label-secondary);}',
+      '.cc-screen-caption-body{max-height:180px;overflow:auto;white-space:pre-wrap;font-size:12px;',
+      'line-height:1.7;color:var(--dsw-alias-label-primary);overflow-wrap:anywhere;}',
       '.cc-chip[data-installed="yes"]{color:var(--dsw-alias-state-success-primary);border-color:var(--dsw-alias-state-success-tertiary);}',
       '@media (max-width:720px){.cc-cards{grid-template-columns:repeat(auto-fit,minmax(140px,1fr));}}',
     ].join('');
@@ -1331,6 +1353,9 @@ window.__ModuleLoader__.load({
       const [pauseBusy, setPauseBusy] = useState(false);
       const [petPlugins, setPetPlugins] = useState(null);
       const [petPluginsError, setPetPluginsError] = useState('');
+      const [screenLoading, setScreenLoading] = useState(false);
+      const [screenResult, setScreenResult] = useState(null);
+      const [screenError, setScreenError] = useState('');
       const [cooPlugins, setCooPlugins] = useState(null);
       const [cooError, setCooError] = useState('');
       const [cooNotice, setCooNotice] = useState('');
@@ -1367,6 +1392,24 @@ window.__ModuleLoader__.load({
         setPetPluginsError(`${tRef.current('cc.pet.err')}：${readableReason(result, tRef.current)}`);
         return null;
       }, []);
+
+      /** T35：看屏幕（截图 + 本机 Ollama 视觉描述）。 */
+      const lookAtScreen = async () => {
+        if (screenLoading) return;
+        setScreenLoading(true);
+        setScreenError('');
+        try {
+          const result = await fetchJson(api('screen-look'), { method: 'POST', body: {}, timeoutMs: 150_000 });
+          if (!aliveRef.current) return;
+          if (result.ok && result.data && result.data.ok === true) {
+            setScreenResult(result.data);
+          } else {
+            setScreenError(`${tRef.current('cc.pet.screen.failed')}：${readableReason(result, tRef.current)}`);
+          }
+        } finally {
+          if (aliveRef.current) setScreenLoading(false);
+        }
+      };
 
       /** T33：拉 Coo 插件列表（下载/已装/主程序状态）。 */
       const loadCooPlugins = useCallback(async () => {
@@ -1598,7 +1641,23 @@ window.__ModuleLoader__.load({
                   ? h('button', { type: 'button', className: 'wp-btn', disabled: pauseBusy, onClick: togglePause }, pauseBusy ? t('cc.pauseBusy') : row.actionLabel)
                   : row.action === 'settings'
                     ? h('button', { type: 'button', className: 'wp-btn', onClick: () => { if (switchTab !== null) switchTab('settings'); } }, row.actionLabel)
-                    : h('button', { type: 'button', className: 'wp-btn', disabled: true }, row.status))))),
+                    : row.action === 'screen'
+                      ? h('button', {
+                        type: 'button',
+                        className: 'wp-btn wp-btn-primary',
+                        disabled: screenLoading || row.enabled !== true,
+                        onClick: lookAtScreen,
+                      }, screenLoading ? t('cc.pet.screen.loading') : row.actionLabel)
+                      : h('button', { type: 'button', className: 'wp-btn', disabled: true }, row.status))))),
+            screenError !== '' ? h('div', { className: 'set-note set-note-error' }, screenError) : null,
+            screenResult !== null
+              ? h('div', { className: 'cc-screen-caption', 'data-screen-caption': '1' },
+                h('div', { className: 'cc-screen-caption-head' },
+                  h('span', {}, t('cc.pet.screen.captionTitle')),
+                  h('span', { className: 'set-row-hint' }, screenResult.model || '')),
+                h('div', { className: 'cc-screen-caption-body' }, screenResult.caption || t('cc.pet.screen.empty')),
+                h('div', { className: 'set-note' }, t('cc.pet.screen.privacy')))
+              : null,
             h('div', { className: 'set-note' }, t('cc.pet.footer'))),
           // ── T33：Coopanion 扩展（默认折叠，弱化；只影响 Coo 主程序）──
           h('details', { className: 'cc-section cc-coo-details', 'data-coo-plugins': '1' },

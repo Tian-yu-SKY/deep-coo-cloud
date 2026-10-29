@@ -13,7 +13,7 @@ T24 加「Coo 市场」Tab：浏览 npm 上的 Coo/Coopanion 扩展（Cortico �
 - Host 半：`index.js` —— 在 DSH Web 服务器注册同源路由 `/whale-panel/*`（聊天/设置/服务器 QQ 配置）与 `/control-center/*`（状态聚合/PAUSED，Tab 内复用），代理 bridge HTTP、转发 bridge token、按需 ssh 读写服务器 awareness patch。
 - Client 半：`client.js` —— 注册**一个** `sidebar.panellist`（id=`whale-chat`、label=「鲸歌」、order=5）与一个 `main` keyed 整页 Tab 外壳。
 - 无构建步骤（纯 ESM/CJS 工厂 bundle）；样式只用 DSH 主题 token（`--dsw-alias-*`），跟随明暗主题。
-- 版本：`2.3.0`（T34 总控台「本机桌宠插件」；包名 `deep-coo-cloud`）；离线测试 **139 项**（host / client / manifest / control-center / settings / pet-diy / pet-diy-import / coo-market / coo-market-download / coo-plugins / pet-plugins 十一组）。
+- 版本：`2.4.0`（T35 看屏幕接入本机 Ollama 视觉模型；包名 `deep-coo-cloud`）；离线测试 **147 项**（host / client / manifest / control-center / settings / pet-diy / pet-diy-import / coo-market / coo-market-download / coo-plugins / pet-plugins / vision 十二组）。
 - **可分发**：默认配置不含任何本机/服务器私有信息（IP/域名/QQ 号/路径/SSH key/token）；侧栏名称、面板标题、Tab 文案、桥接地址、服务器 SSH、QQ 白名单均可在「设置 → 通用/连接」里配置（保存到 `whale-panel/settings.json`）。
 - 「设置 → 桌宠 DIY」依赖 coo-fork 桌宠插件 **`dsh-coo-pet-remote@0.4.0-remote.1`**（T22）：写 `coo-pet-data/pet-settings.json` 后插件 ~1s 热应用；该插件 config 未覆盖 settingsFile，默认路径与本插件默认一致。
 
@@ -146,14 +146,16 @@ B 方案不碰大脑：只在本机桌宠侧聚合/开关原生能力，保留�
 - **Host `GET /whale-panel/pet-plugins`**（只读）：聚合
   `observer{running,paused,pid,lastHeartbeatAt,foreground{process,title}}`（读 context-observer 状态）、
   `crossChat{configured,sshEnabled,awarenessPatchConfigured,qqGroupsCount,qqChatsCount}`、
-  `diy{packCount,packs[]}`（扫 `coo-pet-data/web`）、`screen{available:false,reason,requires:'vision-model'}`。
-  不执行任何第三方代码、不改设置。
+  `diy{packCount,packs[]}`（扫 `coo-pet-data/web`）、`screen{available,model,endpoint,reason,requires:'vision-model'}`
+  （真实探测本机 Ollama `/api/tags`）。不执行任何第三方代码、不改设置。
 - **总控台 UI「本机桌宠插件」卡**（状态卡片之后）：
   - 前台感知 / 游戏陪玩：运行中/已暂停 + 当前前台窗口（进程/标题）；按钮「暂停/恢复」复用现有
     `POST /control-center/pause-context`；
   - 跨端接话（QQ ↔ 桌面）：显示已启用/未配置（SSH/QQ 白名单计数）+「去设置」；
   - 桌宠 DIY / 形象包：显示已安装形象包数量 +「去设置」；
-  - 看屏幕（实验）：禁用并注明「需要视觉模型，当前远程 DSH 文本模型看不到图」；
+  - 看屏幕（T35）：真实探测本机 Ollama（`GET /api/tags`，1.5s 超时、缓存 10s）；可用时显示「看一眼屏幕」按钮，
+    点击 → PowerShell 截主屏 1280×720 JPEG（存 `<coo-pet-data>/screenshots/latest.jpg`）→ 本机 Ollama
+    `qwen2.5vl:3b` 生成中文 caption（显示在卡片内，可滚动；截图只存本机、只发回环 Ollama）；不可用时禁用+原因；
   - 底部说明：保留远程人格、记忆与 QQ 同一身份，这些插件不改变大脑。
 - **原「Coo 插件」卡**改为默认折叠的 `<details>`，标题「Coopanion 扩展（仅 Coo 主程序，不影响本机桌宠）」；
   安装/运行/重启只影响 Coo 主程序，不再作为本机桌宠的主操作。
@@ -184,7 +186,8 @@ bridge 的 HTTP 接口（`/health` `/history` `/say` …）**没有 CORS 头**�
   GET  /whale-panel/pet-diy          ──────▶  读 pet-settings.json + 扫描 web/*/figure.json + skin.json   ──▶ coo-pet-data（只读）
   POST /whale-panel/pet-diy          ──────▶  白名单校验 + 合并写 pet-settings.json（原子写 + .bak 备份；插件 ~1s 热应用）
   POST /whale-panel/pet-diy/import-pack ────▶  原始 ZIP（≤128MB）→ 安全校验/解包 → coo-pet-data/figures|web/<id>（不执行）
-  GET  /whale-panel/pet-plugins        ──────▶  本机桌宠原生插件状态（observer/跨端/DIY/看屏幕；只读）
+  GET  /whale-panel/pet-plugins        ──────▶  本机桌宠原生插件状态（observer/跨端/DIY/看屏幕探测；只读）
+  POST /whale-panel/screen-look        ──────▶  截图 1280×720 JPEG → 本机 Ollama 视觉模型 → caption（只发回环）
   GET  /whale-panel/coo-plugins        ──────▶  已下载/已安装 Coo 插件 + Coopanion 主程序状态（缓存 ~3s）
   POST /whale-panel/coo-plugins/install|uninstall  ─▶  pnpm add/remove（confirm；需重启 Coopanion）
   POST /whale-panel/coo-plugins/run|restart        ─▶  spawn Coopanion.exe / 只杀主程序后重启（不杀 pet-host）
@@ -290,6 +293,11 @@ plugin_manager { action: "set_bundle", target: "@local/dsh-whale-panel", enabled
 | `cooDownloadMaxBytes` / `cooDownloadTimeoutMs` | `209715200` / `120000` | tarball 上限 200MB / 下载超时 120s |
 | `cooTarPath` | `tar.exe`（Windows 自动用 System32\tar.exe，避免 MSYS tar） | 解包用系统 tar（只解包，不执行包内容） |
 | `cooRoot` / `cooPnpmPath` | 空（自动探测 Coopanion 安装：环境变量/常见目录/运行中进程；pnpm 在 `<cooRoot>/resources/app/node_modules/pnpm/bin/pnpm.cjs`） | 安装到 Coopanion 时用的根与 pnpm |
+| `visionEndpoint` | `http://127.0.0.1:11434` | 本机 Ollama 地址（只允许 http/https + 回环） |
+| `visionModel` | `qwen2.5vl:3b` | 视觉模型名（探测 /api/tags；generate 时使用） |
+| `visionPrompt` | 中文两三句描述 prompt | 视觉模型提示词（不逐字读屏/不猜隐私） |
+| `visionTimeoutMs` | `120000` | 视觉推理超时（热推理 ~1.3s，冷加载 ~12s） |
+| `screenShotDir` | 空（= `<cooPetDataRoot>/screenshots`） | 看屏幕截图目录（latest.jpg） |
 | `cooExeName` | `Coopanion.exe` | 要 spawn 的 Coo 主程序 exe（相对 `cooRoot`） |
 | `cooProcessCacheMs` / `cooRestartWaitMs` | `3000` / `1500` | Coopanion 进程状态缓存 / 重启时等待旧进程退出 |
 
@@ -400,6 +408,19 @@ errors: 无
 - **私有值 grep 自查**：`index.js` / `client.js` / `cordis.patch.yml` / `test/*.mjs` 中不含 `<your-host>`、QQ 号、`D:/...` 本机路径、`C:/Users/...`、SSH key 文件名等私有值（README 全部用占位符；测试用 `example.test` / `group:<id>` 占位）。
 - T26 新增测试：默认通用值、UI/桥接/SSH/QQ 白名单校验与保存、显式空 SSH → `GET settings` 返回 disabled 且 `apply-awareness` 400 `ssh-disabled`、`GET /config` 下发 ui/sshEnabled/qqDefaults/paths、client `localizeWithUi`/Tab 文案覆盖/设置页「通用 / 连接」渲染。
 - 未实测真实「局域网 bridge」与真实 SSH 应用（默认禁用；需要的用户填 `serverSshHost` 后用）。全部测试离线 mock。
+
+### T35 联调记录（2026-10-29，未安装、未重启本机 DSH）
+
+- 离线测试 **147/147 PASS**，新增 `vision.test.mjs` 6 项：endpoint 回环校验、probeVision
+  （tags 含模型 available=true / 缺模型/失败 false / 10s 缓存不重复请求）、screen-look 成功
+  （mock 截图 + mock Ollama：caption/model/elapsedMs/截图路径/bytes、请求体 model/images/stream=false/
+  num_ctx=8192/num_predict=160）、截图失败 502、Ollama 500→502、超时→504、非回环 endpoint→502、403/405；
+  client 新增 1 项（视觉可用时 screen 行可点击/按钮文案）。
+- **真实 Ollama 冒烟**（不截真实屏幕）：用 PowerShell 自造 320×180 纯色测试图 → `qwen2.5vl:3b`
+  `POST /api/generate` → 200、**热推理 1651ms**、caption「这张图的主色调是蓝色。」；
+  `GET /whale-panel/pet-plugins` 探测 → `screen:{available:true,model:'qwen2.5vl:3b',endpoint:'http://127.0.0.1:11434'}`。
+- 截图脚本（System.Drawing 1280×720 JPEG quality 80）已用合成位图验证保存分支；**未截真实屏幕**（留给 Lead reload 后点按钮验证）。
+- 安全：截图只写本机 `coo-pet-data/screenshots/latest.jpg`，只发本机回环 Ollama，不外发、不执行扩展代码。
 
 ### T34 联调记录（2026-10-29，未安装、未重启本机 DSH）
 
@@ -540,8 +561,9 @@ errors: 无
 38. **Coo 插件安装/卸载后必须重启 Coopanion 主程序才生效**（Cortico 语义）；「重启并运行」会结束当前 Coo 主程序（不影响 pet-host；正在使用的 Coo 窗口会关闭）。
 39. **Coo 插件操作会运行第三方代码**：安装/运行等于让 Coopanion 加载这些扩展，请自行判断来源与安全；本插件只执行 pnpm add/remove 与 spawn Coopanion.exe，不执行扩展代码。
 40. **依赖 Coopanion 安装可探测**（`cooRoot`/`Coopanion.exe`/自带 pnpm）：探测不到时卡片给出可读错误，可在 config 里显式配置 `cooRoot`/`cooPnpmPath`；安装/卸载走 Coopanion pnpm，失败会回显输出与手动操作提示。
-41. **「本机桌宠插件」卡只聚合现有原生能力、不执行第三方代码**：前台感知/跨端接话/DIY 的状态来自 observer 状态文件与设置；「看屏幕」暂不可用（远程 DSH 为文本模型，需要视觉模型）。
-42. **Coopanion 扩展卡默认折叠且只影响 Coo 主程序**：不影响本机桌宠/远程人格/QQ；「加入并运行」不再是主操作，需展开后显式确认。
+41. **「本机桌宠插件」卡聚合现有原生能力、不执行第三方代码**：前台感知/跨端接话/DIY 的状态来自 observer 状态文件与设置；「看屏幕」需要本机 Ollama 运行且装有 `visionModel`（默认 qwen2.5vl:3b），探测失败/未运行时按钮禁用并显示原因。
+42. **看屏幕截图只存本机**：`coo-pet-data/screenshots/latest.jpg`（可配 `screenShotDir`），只发回环 Ollama；截图本身是当前主屏内容，请在知情下使用；推理超时/模型崩会返回可读 502/504。
+43. **Coopanion 扩展卡默认折叠且只影响 Coo 主程序**：不影响本机桌宠/远程人格/QQ；「加入并运行」不再是主操作，需展开后显式确认。
 
 ## 6. 文件
 
