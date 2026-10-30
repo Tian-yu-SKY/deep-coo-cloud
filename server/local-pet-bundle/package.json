@@ -1,0 +1,13 @@
+{
+  "name": "dsh-link-local-pet",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "dsh-link Phase 1：本地/Coo 桌宠专用隔离 agent preset（local-pet）+ 工具守卫（只允许长期记忆工具）",
+  "license": "MIT",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

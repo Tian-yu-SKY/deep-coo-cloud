@@ -64,6 +64,7 @@
 ## 文档
 
 - [插件介绍（完整）](docs/deep-coo-cloud-intro.md)
+- [长期会话 Token 修复报告（T39）](docs/T39-token-compaction-fix.md)
 - [安装说明](INSTALL.md)
 
 ## 致谢 / 第三方

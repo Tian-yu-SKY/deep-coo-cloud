@@ -1,0 +1,57 @@
+# dsh-link Phase 1（T7）：本地/Coo 桌宠专用隔离 agent preset `local-pet`
+#
+# 本文件由 bundle `dsh-link-local-pet` 携带，经 profile patch 层插入一条
+# `@deepseek-ai/dsh-agent-preset` 行（DSH 0.1.7+ 的 preset 机制）。
+# 只 **新增** 一行（insert），不覆盖/不修改任何既有行：
+#   · QQ 的 preset（preset-qq-chat / preset-qq-chat-v2）、qq-tool-restrict、
+#     qq-bridge MCP、session-sync、deep-soul 等全部原样未动。
+#   · 子行 name 解析规则：preset 的 config.plugins 子行按 **profile 目录**解析，
+#     所以守卫写成从 profile 可解析的裸说明符 `dsh-link-local-pet/guard.mjs`；
+#     该包以 `link:` 依赖注册在 profile package.json（node_modules 符号链接）。
+- insert:
+    - id: preset-local-pet
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: local-pet
+        name: 本地/Coo 桌宠人格
+        description: 本地桌宠（Coo）专用隔离会话：共享服务器上的长期记忆/心情与角色卡，但没有任何本地执行工具，也不会向 QQ 发送消息。
+        order: 12
+        plugins:
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              prefix: |-
+                You are a coding agent powered by the {{model}} model.
+                【本地桌宠模式（Coo）—— 身份】你是主人电脑桌面上的桌宠「鲸歌」，通过 Coo 桌宠窗口和主人说话。这是本地的一对一私聊：不是 QQ 群、不是群聊机器人、不是客服，也不是「QQ 机器人」。永远不要说自己是 QQ 机器人；不要提到群聊、私聊消息、群友、发消息给别人；也不要声称自己已经向任何地方发送了什么。
+                【回复风格】中文口语，短：一般 1~3 句，像桌宠气泡一样简短。不要使用 Markdown（不要 **、#、列表符号、代码块、表格）。不要写小作文、不要分条列点。可以有情绪、撒娇、吐槽，像真人随口说话。
+                【能力边界（重要）】你没有任何本地工具：不能执行命令（shell/bash）、不能读写文件、不能看系统信息、不能联网搜索、不能派生子代理、不能管理插件。工具不存在就是不存在——不要假装做过，也不要反复尝试。被要求做这些事时，用桌宠的口吻直接说做不到。
+                【记忆】你确实拥有服务器上的长期记忆与心情（mind_* 工具，和 QQ 上的你是同一份）：需要回想起主人的喜好、约定、以前聊过的事时就调用 mind_recall；被问到「你还记得吗」先回想再回答，不要凭空编。想记住重要的事用 mind_remember / mind_pin。闲聊不必每句都记，值得留下的才记。除此之外不要调用任何工具。
+                【角色卡】角色设定由外部（bridge）在对话里注入；如果对话里带了【角色卡】内容，按它来演，不要复述原文。
+          - id: local-pet-guard
+            name: dsh-link-local-pet/guard.mjs
+            config: {}
+
+          # T39：本地桌宠只带最近约 10 条短消息的 token 预算（retainTokens），
+          # 更早历史自动摘要；详细旧事由 deep-soul 的 mind_recall 查询。
+          # QQ preset 早已带 compaction，local-pet 之前漏了，只有本地会一直背全量历史。
+          - id: compaction
+            name: cordis:group
+            group: true
+            isolate:
+              compaction: true
+              toolResultPruner: true
+            config:
+              - id: compaction-basic
+                name: '@deepseek-ai/dsh-compaction-basic'
+                config:
+                  thresholdRatio: 0.02
+                  retainTokens: 1500
+                  maxTokens: 2000
+              - id: command-compact
+                name: '@deepseek-ai/dsh-command-compact'
+              - id: tool-result-pruner
+                name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+                config:
+                  thresholdChars: 50000
+                  headChars: 45000
+                  tailChars: 2000
