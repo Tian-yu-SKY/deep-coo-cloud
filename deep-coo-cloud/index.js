@@ -166,7 +166,7 @@ export const DEFAULTS = Object.freeze({
   /** 本机视觉模型（T35）：Ollama endpoint / 模型 / prompt / 推理超时 / 截图目录（空=cooPetDataRoot/screenshots）。 */
   visionEndpoint: 'http://127.0.0.1:11434',
   visionModel: 'qwen2.5vl:3b',
-  visionPrompt: '用两三句中文描述这张屏幕截图：用户可能正在做什么、画面里有什么明显内容。不要逐字读屏，不要猜测隐私信息；看不清就简短说明。',
+  visionPrompt: 'Describe this screenshot in 2-3 short Chinese sentences. Answer in Chinese only. Say what the user is probably doing and what is clearly visible. Do not read the screen word by word or guess private details; if unclear, keep it brief.',
   visionTimeoutMs: 120_000,
   screenShotDir: '',
   /** Coo 插件列表/启动（T33）：主程序 exe / 进程状态缓存 / 重启等待。 */
@@ -1631,8 +1631,8 @@ async function handleScreenAutoToggle(req, res, settings) {
 
 const VISION_PROBE_TIMEOUT_MS = 1_500;
 const VISION_PROBE_CACHE_MS = 10_000;
-const SCREEN_WIDTH = 1280;
-const SCREEN_HEIGHT = 720;
+const SCREEN_WIDTH = 640;
+const SCREEN_HEIGHT = 360;
 
 /** 视觉 endpoint 只允许 http/https + 回环。 */
 export function normalizeVisionEndpoint(value) {
@@ -1694,7 +1694,7 @@ export function resolveScreenshotPath(settings) {
   return path.join(dir, 'latest.jpg');
 }
 
-/** PowerShell + System.Drawing 截主屏，缩放到 1280x720 JPEG（质量 80）。 */
+/** PowerShell + System.Drawing 截主屏，缩放到 640x360 JPEG（质量 80）。 */
 export async function captureScreenJpeg(settings, screenshotPath, deps = {}) {
   if (typeof deps.captureScreen === 'function') {
     const result = await deps.captureScreen(settings, screenshotPath);
@@ -1749,7 +1749,7 @@ export async function callVisionModel(settings, imageBuffer, deps = {}) {
   }
   const prompt = typeof settings.visionPrompt === 'string' && settings.visionPrompt.trim() !== ''
     ? settings.visionPrompt.trim()
-    : '用两三句中文描述这张屏幕截图。';
+    : 'Describe this screenshot in 2-3 short Chinese sentences. Answer in Chinese only. Do not read the screen word by word.';
   const timeoutMs = Math.max(1_000, Number(settings.visionTimeoutMs) || 120_000);
   const fetchImpl = deps.visionFetch ?? deps.fetchImpl ?? globalThis.fetch;
   const startedAt = Date.now();
@@ -1763,7 +1763,7 @@ export async function callVisionModel(settings, imageBuffer, deps = {}) {
         prompt,
         images: [imageBuffer.toString('base64')],
         stream: false,
-        options: { num_ctx: 8192, num_predict: 160, temperature: 0.2 },
+        options: { num_ctx: 8192, num_predict: 120, temperature: 0.2, num_gpu: 0 },
       }),
       signal: typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
         ? AbortSignal.timeout(timeoutMs)

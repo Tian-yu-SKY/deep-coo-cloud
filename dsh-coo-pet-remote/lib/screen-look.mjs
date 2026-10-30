@@ -28,14 +28,14 @@ export const SCREEN_AUTO_FILE = 'screen-autolook.json';
 export const SCREEN_STATE_FILE = 'screen-look-state.json';
 export const SCREEN_TICK_MS = 5_000;
 export const SCREEN_KEEP_SHOTS = 10;
-export const SCREEN_WIDTH = 1280;
-export const SCREEN_HEIGHT = 720;
+export const SCREEN_WIDTH = 640;
+export const SCREEN_HEIGHT = 360;
 /** 两帧 64 位 dHash 的汉明距离 ≤ 这个值就算「屏幕没变」（光标/时钟的小变化不算）。 */
 export const SCREEN_SAME_HAMMING = 8;
 /** caption 的 Jaccard 相似度 > 这个值就跳过（避免反复念叨同一屏）。 */
 export const SCREEN_CAPTION_SIMILARITY = 0.85;
 export const SCREEN_SILENCE = '[沉默]';
-export const SCREEN_DEFAULT_PROMPT = '用两三句中文描述这张屏幕截图。';
+export const SCREEN_DEFAULT_PROMPT = 'Describe this screenshot in 2-3 short Chinese sentences. Answer in Chinese only. Say what the user is probably doing and what is clearly visible. Do not read the screen word by word or guess private details; if unclear, keep it brief.';
 export const SCREEN_DECIDE_TEMPLATE = '（你偷偷瞄了一眼主人的屏幕，看到：${caption}。'
   + '用你自己的语气直接说一句（≤40字），可以吐槽、关心或提醒；'
   + '除非真的不想打扰，否则不要回「[沉默]」。）';
@@ -293,7 +293,7 @@ export function buildDecidePrompt(caption) {
 /* ============================== 截图（PowerShell + System.Drawing） ============================== */
 
 /**
- * 截主屏 → 1280×720 JPEG（质量 80），同时把屏幕缩成 64×36 灰度输出 hex（给 dHash 用）。
+ * 截主屏 → 640×360 JPEG（质量 80），同时把屏幕缩成 64×36 灰度输出 hex（给 dHash 用）。
  * 只在本机执行 PowerShell，不装任何依赖、不执行第三方代码。
  *
  * @param {object} opts
@@ -391,7 +391,7 @@ export async function callVisionModel({
         prompt: String(prompt ?? '').trim() || SCREEN_DEFAULT_PROMPT,
         images: [imageBuffer.toString('base64')],
         stream: false,
-        options: { num_ctx: 8192, num_predict: 160, temperature: 0.2 },
+        options: { num_ctx: 8192, num_predict: 120, temperature: 0.2, num_gpu: 0 },
       }),
       signal,
     });
@@ -554,11 +554,12 @@ export function createScreenAutoLook({
         maxPerHour: settings.maxPerHour,
       });
       if (!due.due) return { skipped: due.reason };
-      if (!brain) return { skipped: 'no-brain' };
-      if (brain.busy) return { skipped: 'brain-busy' };
-      if (!isBrainAvailable()) return { skipped: 'brain-unavailable' };
+      // 她正在跟主人说话时让路，不抢截图/不说插话。
+      if (brain && brain.busy) return { skipped: 'brain-busy' };
 
       // ---- 1) 截图 ----
+      // 注意：即使远程大脑暂时没连上，也照常截图+看屏幕；只是不说话。
+      // 这样 bridge 重连后，下一轮就能继续，不会因为一次断线卡死整个自动看屏。
       mkdirSync(shotDir, { recursive: true });
       const shotPath = screenshotFilePath(shotDir, at);
       let captureResult;
@@ -625,6 +626,11 @@ export function createScreenAutoLook({
       }
 
       // ---- 5) 让她自己决定说不说（同一个人格） ----
+      // 大脑不可用时仍然保留刚看到的 caption；等它连上再说话。
+      if (!brain || brain.busy || !isBrainAvailable()) {
+        scheduleNext(at + jitteredInterval(settings.intervalMs, random));
+        return { skipped: 'brain-unavailable', looked: true, caption };
+      }
       let reply = '';
       try {
         reply = String(await brainSay(buildDecidePrompt(caption)) ?? '').trim();
